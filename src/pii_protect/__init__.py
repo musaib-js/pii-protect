@@ -35,9 +35,9 @@ Quick start
 Author: Musaib Altaf
 """
 
-from pii_shield.crypto import AESGCMCipher
-from pii_shield.engine import PIIMaskingEngine
-from pii_shield.exceptions import (
+from pii_protect.crypto import AESGCMCipher
+from pii_protect.engine import PIIMaskingEngine
+from pii_protect.exceptions import (
     DecryptionError,
     EngineNotInitialisedError,
     OptionalDependencyMissingError,
@@ -45,9 +45,9 @@ from pii_shield.exceptions import (
     StorageBackendError,
     StorageNotConnectedError,
 )
-from pii_shield.ner import NEREngine
-from pii_shield.tokens import DeterministicTokenGenerator
-from pii_shield.types import (
+from pii_protect.ner import NEREngine
+from pii_protect.tokens import DeterministicTokenGenerator
+from pii_protect.types import (
     DetectedEntityInfo,
     DetectedSpan,
     EntityType,
@@ -56,7 +56,7 @@ from pii_shield.types import (
     UnmaskResult,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"
 
 __all__ = [
     "PIIMaskingEngine",

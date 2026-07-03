@@ -41,8 +41,8 @@ never a bare `ImportError` or a silent failure.
 
 ```python
 import asyncio
-from pii_shield import PIIMaskingEngine
-from pii_shield.storage import InMemoryStorage
+from pii_protect import PIIMaskingEngine
+from pii_protect.storage import InMemoryStorage
 
 async def main():
     async with PIIMaskingEngine(storage=InMemoryStorage()) as engine:
@@ -102,7 +102,7 @@ instead of being encrypted and stored twice — pass the same scope to
 ```
                     ┌─────────────────────────────────────────┐
                     │             PIIMaskingEngine             │
-                    │        (pii_shield.engine)               │
+                    │        (pii_protect.engine)               │
                     │                                           │
                     │   mask()    unmask()    redact()          │
                     └───────┬───────────┬───────────┬───────────┘
@@ -112,7 +112,7 @@ instead of being encrypted and stored twice — pass the same scope to
               ▼                         │                  no encrypt, no store)
    ┌─────────────────────┐              │
    │      NEREngine        │            │
-   │   (pii_shield.ner)     │            │
+   │   (pii_protect.ner)     │            │
    │                        │            │
    │  RegexNERLayer   (always on)        │
    │  SpacyNERLayer   (optional)         │
@@ -126,7 +126,7 @@ instead of being encrypted and stored twice — pass the same scope to
    ┌─────────────────────┐               │
    │ DeterministicToken-   │             │
    │ Generator              │             │
-   │ (pii_shield.tokens)    │             │
+   │ (pii_protect.tokens)    │             │
    │                        │             │
    │  {{TYPE:xxxxx}}        │             │
    │  find_tokens_in_text() │◄────────────┘
@@ -135,7 +135,7 @@ instead of being encrypted and stored twice — pass the same scope to
               ▼
    ┌─────────────────────┐        ┌───────────────────────────────┐
    │   AESGCMCipher        │       │        StorageBackend           │
-   │  (pii_shield.crypto)   │──────▶       (pii_shield.storage)       │
+   │  (pii_protect.crypto)   │──────▶       (pii_protect.storage)       │
    │                        │       │                                 │
    │  encrypt() / decrypt() │       │  InMemoryStorage                │
    │  AES-256-GCM            │      │  FileSystemStorage               │
@@ -146,13 +146,13 @@ instead of being encrypted and stored twice — pass the same scope to
 
 ### Components
 
-**`PIIMaskingEngine`** (`pii_shield.engine`) is the single public entry
+**`PIIMaskingEngine`** (`pii_protect.engine`) is the single public entry
 point. It owns one `NEREngine`, one `DeterministicTokenGenerator`, one
 `AESGCMCipher`, and one `StorageBackend`, and wires them together for
 `mask()` / `unmask()` / `redact()`. This is the only class most callers
 need to import.
 
-**`NEREngine`** (`pii_shield.ner`) does detection only — it never touches
+**`NEREngine`** (`pii_protect.ner`) does detection only — it never touches
 encryption or storage. It runs one or more layers over the input text and
 merges their output into a single non-overlapping span list:
 
@@ -172,7 +172,7 @@ then higher confidence, then longer span), and
 `TokenizerSafeSpanMerger` stitches back together sub-word fragments
 that some transformer models emit at token boundaries.
 
-**`DeterministicTokenGenerator`** (`pii_shield.tokens`) turns a detected
+**`DeterministicTokenGenerator`** (`pii_protect.tokens`) turns a detected
 span into a `{{ENTITY_TYPE:xxxxx}}` placeholder — a 5-hex-character
 suffix derived from `SHA-256(value | entity_type | salt)`. Same value +
 same entity type always produces the same token within one salted
@@ -183,14 +183,14 @@ deduplication, so multiple engine instances backed by the same storage
 can recognise a value they've each seen before, even though their
 salted tokens differ.
 
-**`AESGCMCipher`** (`pii_shield.crypto`) is the only component that ever
+**`AESGCMCipher`** (`pii_protect.crypto`) is the only component that ever
 sees plaintext PII outside of the `NEREngine`. Each value is encrypted
 with AES-256-GCM using a fresh 96-bit IV, with the entity type bound in
 as additional authenticated data (AAD) — so a stored ciphertext can't be
 replayed under a different entity type. Storage backends only ever
 receive ciphertext, IV, and tag; they never see plaintext.
 
-**`StorageBackend`** (`pii_shield.storage`) is an abstract interface with
+**`StorageBackend`** (`pii_protect.storage`) is an abstract interface with
 five methods a backend must implement: `put`, `get`, `get_many`,
 `find_by_value_hash`, `touch` (plus an optional `log_access` audit hook).
 `PIIMaskingEngine` depends only on this interface, which is what makes
@@ -248,8 +248,8 @@ irreversible rather than just "not currently reversed."
 ## Configuring detection
 
 ```python
-from pii_shield import NEREngine, PIIMaskingEngine
-from pii_shield.storage import InMemoryStorage
+from pii_protect import NEREngine, PIIMaskingEngine
+from pii_protect.storage import InMemoryStorage
 
 ner = NEREngine(
     enable_spacy=True,                 # PERSON / ORGANISATION / ADDRESS
@@ -271,7 +271,7 @@ extra dependencies.
 ## Encryption key
 
 ```python
-from pii_shield.crypto import AESGCMCipher
+from pii_protect.crypto import AESGCMCipher
 
 engine = PIIMaskingEngine(storage=..., encryption_key="<64-char hex string>")
 # or
@@ -289,7 +289,7 @@ permanently unrecoverable, by design.
 ## Storage backend examples
 
 ```python
-from pii_shield.storage import InMemoryStorage, FileSystemStorage, RedisStorage, PostgresStorage
+from pii_protect.storage import InMemoryStorage, FileSystemStorage, RedisStorage, PostgresStorage
 
 InMemoryStorage()
 FileSystemStorage("./vault.json")
@@ -300,8 +300,8 @@ PostgresStorage("postgresql://user:pass@host:5432/mydb")   # creates its own sch
 Custom backend:
 
 ```python
-from pii_shield.storage import StorageBackend
-from pii_shield.types import TokenRecord
+from pii_protect.storage import StorageBackend
+from pii_protect.types import TokenRecord
 
 class MyBackend(StorageBackend):
     async def put(self, record: TokenRecord) -> None: ...
@@ -316,7 +316,7 @@ class MyBackend(StorageBackend):
 ## Error handling
 
 ```python
-from pii_shield import (
+from pii_protect import (
     PIIShieldError,               # base class for everything below
     EngineNotInitialisedError,     # mask()/unmask() called before initialise()
     DecryptionError,               # AES-GCM tag verification failed
