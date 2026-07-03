@@ -1,8 +1,8 @@
-# pii-shield
+# pii-protect
 
 A pluggable, on-premise-first PII masking, unmasking, and redaction library for Python.
 
-`pii-shield` detects personally identifiable and sensitive business
+`pii-protect` detects personally identifiable and sensitive business
 information in free text (emails, phone numbers, GST/PAN/IBAN numbers,
 person and organisation names, bank details, invoice/PO numbers, and more),
 and gives you three ways to handle it:
@@ -21,12 +21,12 @@ Redis, or PostgreSQL, or a backend you write yourself.
 ## Install
 
 ```bash
-pip install pii-shield                      # core: regex detection + in-memory/filesystem storage
-pip install "pii-shield[postgres]"           # + PostgreSQL storage backend
-pip install "pii-shield[redis]"              # + Redis storage backend
-pip install "pii-shield[spacy]"              # + spaCy NER layer (PERSON/ORG/GPE)
-pip install "pii-shield[privacy-filter]"     # + transformer token-classification layer
-pip install "pii-shield[all]"                # everything
+pip install pii-protect                      # core: regex detection + in-memory/filesystem storage
+pip install "pii-protect[postgres]"           # + PostgreSQL storage backend
+pip install "pii-protect[redis]"              # + Redis storage backend
+pip install "pii-protect[spacy]"              # + spaCy NER layer (PERSON/ORG/GPE)
+pip install "pii-protect[privacy-filter]"     # + transformer token-classification layer
+pip install "pii-protect[all]"                # everything
 ```
 
 Only `cryptography` is a hard dependency. `asyncpg`, `redis`, `spacy`, and
@@ -161,10 +161,10 @@ merges their output into a single non-overlapping span list:
   account/sort-code/routing numbers, credit cards, email, phone
   (India + international), invoice and PO references.
 - `SpacyNERLayer` — optional. Adds PERSON / ORGANISATION / ADDRESS
-  detection via a local spaCy model. Requires `pii-shield[spacy]`.
+  detection via a local spaCy model. Requires `pii-protect[spacy]`.
 - `PrivacyFilterLayer` — optional. Adds detection via any HuggingFace
   token-classification model you point it at, run entirely on-premise
-  through `transformers.pipeline`. Requires `pii-shield[privacy-filter]`.
+  through `transformers.pipeline`. Requires `pii-protect[privacy-filter]`.
 
 When layers disagree or overlap, `SpanConflictResolver` picks a winner
 (regex-validated spans win first, then financial-entity-over-phone,
@@ -201,8 +201,8 @@ encryption code. Four implementations ship out of the box:
 |---|---|---|---|
 | `InMemoryStorage` | None (process lifetime) | — | tests, short scripts |
 | `FileSystemStorage` | Single JSON file, atomic writes | — | single-process, no external infra |
-| `RedisStorage` | Redis hashes per token | `pii-shield[redis]` | shared across processes/hosts |
-| `PostgresStorage` | Relational table, auto-migrated schema | `pii-shield[postgres]` | shared, queryable, audit-loggable |
+| `RedisStorage` | Redis hashes per token | `pii-protect[redis]` | shared across processes/hosts |
+| `PostgresStorage` | Relational table, auto-migrated schema | `pii-protect[postgres]` | shared, queryable, audit-loggable |
 
 Writing a fifth backend (S3, DynamoDB, Vault, etc.) means subclassing
 `StorageBackend` and implementing those five methods — `PIIMaskingEngine`
