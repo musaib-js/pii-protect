@@ -76,3 +76,13 @@ async def test_mask_dict_and_unmask_dict():
 
         restored = await engine.unmask_dict(masked)
         assert restored == data
+
+
+@pytest.mark.asyncio
+async def test_engine_without_context_manager():
+    engine = PIIMaskingEngine(storage=InMemoryStorage(), encryption_key=FIXED_KEY)
+    await engine.initialise()
+    result = await engine.mask(SAMPLE_TEXT)
+    restored = await engine.unmask(result.masked_text)
+    assert restored == SAMPLE_TEXT  
+    

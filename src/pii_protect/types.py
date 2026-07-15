@@ -44,6 +44,9 @@ class EntityType(str, Enum):
     VENDOR_CODE     = "VENDOR_CODE"
     EMPLOYEE_ID     = "EMPLOYEE_ID"
     OTHER           = "OTHER"
+    UPI             = "UPI"
+    URL             = "URL"
+    
 
 
 # ─────────────────────────────────────────────────────────────────────────────
