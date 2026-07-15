@@ -98,11 +98,15 @@ class RegexPatternLibrary:
             (cls.ACCOUNT_NUM, EntityType.ACCOUNT,        0.88),
             (cls.SORT_CODE,   EntityType.SORT_CODE,      0.80),
             (cls.CREDIT_CARD, EntityType.CREDIT_CARD,    0.85),
+            (cls.UPI,         EntityType.UPI,            0.80),
             (cls.EMAIL,       EntityType.EMAIL,          0.99),
             (cls.PHONE_IN,    EntityType.PHONE,          0.95),
             (cls.PHONE_INTL,  EntityType.PHONE,          0.90),
+            (cls.PHONE_WITH_SPACES, EntityType.PHONE,    0.85),
             (cls.INVOICE_REF, EntityType.INVOICE_NUMBER, 0.80),
             (cls.PO_REF,      EntityType.PO_NUMBER,      0.80),
+            (cls.URL,         EntityType.URL,            0.85),
+            (cls.URL_WITHOUT_PROTOCOL, EntityType.URL,   0.80),
         ]
 
 
