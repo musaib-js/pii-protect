@@ -86,9 +86,57 @@ text_back = await engine.unmask(result.masked_text, scope="invoice-2026-00417")
 scrubbed = engine.redact(text)   # synchronous — no storage or encryption involved
 ```
 
-`mask_dict()` / `unmask_dict()` do the same over JSON-serialisable dicts,
-masking all string leaf values in one pass so a repeated value across
-fields still maps to the same token.
+## Working with dictionaries
+
+`mask_dict()` and `unmask_dict()` operate on JSON-serialisable
+Python dictionaries, preserving the structure while masking values.
+
+```python
+data = {
+    "vendor": {
+        "name": "Acme Industries",
+        "email": "john@acme.com",
+    },
+    "invoice_number": "INV-001",
+}
+
+masked = await engine.mask_dict(data)
+
+restored = await engine.unmask_dict(masked)
+```
+
+If you already know which fields contain PII, you can bypass NER entirely
+using `mask_dict_with_known_pii_keys()`. Only the values of the specified
+keys are encrypted and replaced with placeholder tokens.
+
+```python
+data = {
+    "vendor_name": "Acme Industries",
+    "invoice_number": "INV-001",
+    "contact": {
+        "email": "john@acme.com",
+    },
+}
+
+masked = await engine.mask_dict_with_known_pii_keys(
+    data,
+    pii_keys=[
+        "vendor_name",
+        "email",
+    ],
+)
+
+restored = await engine.unmask_dict_with_known_pii_keys(
+    masked,
+    pii_keys=[
+        "vendor_name",
+        "email",
+    ],
+)
+```
+
+This approach skips NER completely and is ideal when the application
+already knows which fields are sensitive.
 
 `scope` is a free-form string (e.g. a document or invoice ID). The same
 PII value repeated within one scope deduplicates to a single stored token
@@ -99,49 +147,45 @@ instead of being encrypted and stored twice — pass the same scope to
 
 ## Architecture
 
-```
-                    ┌─────────────────────────────────────────┐
-                    │             PIIMaskingEngine             │
-                    │        (pii_protect.engine)               │
-                    │                                           │
-                    │   mask()    unmask()    redact()          │
-                    └───────┬───────────┬───────────┬───────────┘
-                            │           │           │
-              ┌─────────────┘           │           └─── (redact never
-              │                         │                  leaves this box —
-              ▼                         │                  no encrypt, no store)
-   ┌─────────────────────┐              │
-   │      NEREngine        │            │
-   │   (pii_protect.ner)     │            │
-   │                        │            │
-   │  RegexNERLayer   (always on)        │
-   │  SpacyNERLayer   (optional)         │
-   │  PrivacyFilterLayer (optional)      │
-   │        │                            │
-   │  TokenizerSafeSpanMerger            │
-   │  SpanConflictResolver               │
-   └──────────┬─────────────┘            │
-              │ DetectedSpan[]           │
-              ▼                          │
-   ┌─────────────────────┐               │
-   │ DeterministicToken-   │             │
-   │ Generator              │             │
-   │ (pii_protect.tokens)    │             │
-   │                        │             │
-   │  {{TYPE:xxxxx}}        │             │
-   │  find_tokens_in_text() │◄────────────┘
-   └──────────┬─────────────┘
-              │ token, value_hash
-              ▼
-   ┌─────────────────────┐        ┌───────────────────────────────┐
-   │   AESGCMCipher        │       │        StorageBackend           │
-   │  (pii_protect.crypto)   │──────▶       (pii_protect.storage)       │
-   │                        │       │                                 │
-   │  encrypt() / decrypt() │       │  InMemoryStorage                │
-   │  AES-256-GCM            │      │  FileSystemStorage               │
-   └────────────────────────┘       │  RedisStorage       (extra)      │
-                                     │  PostgresStorage    (extra)      │
-                                     └───────────────────────────────┘
+```mermaid
+flowchart TD
+
+    ENGINE["PIIMaskingEngine<br/>(pii_protect.engine)<br/><br/>mask() · unmask() · redact()"]
+
+    subgraph NER["NEREngine (pii_protect.ner)"]
+        REGEX["RegexNERLayer<br/>(always on)"]
+        SPACY["SpacyNERLayer<br/>(optional)"]
+        PRIV["PrivacyFilterLayer<br/>(optional)"]
+        MERGER["TokenizerSafeSpanMerger"]
+        RESOLVER["SpanConflictResolver"]
+
+        REGEX --> MERGER
+        SPACY --> MERGER
+        PRIV --> MERGER
+        MERGER --> RESOLVER
+    end
+
+    TOKEN["DeterministicTokenGenerator<br/>(pii_protect.tokens)<br/><br/>{{TYPE:xxxxx}}<br/>find_tokens_in_text()"]
+
+    CRYPTO["AESGCMCipher<br/>(pii_protect.crypto)<br/><br/>AES-256-GCM<br/>encrypt() / decrypt()"]
+
+    subgraph STORAGE["StorageBackend (pii_protect.storage)"]
+        MEM["InMemoryStorage"]
+        FILE["FileSystemStorage"]
+        REDIS["RedisStorage"]
+        PG["PostgresStorage"]
+    end
+
+    ENGINE -->|"mask()"| NER
+    NER -->|"DetectedSpan[]"| TOKEN
+    TOKEN -->|"token + value_hash"| CRYPTO
+    CRYPTO --> STORAGE
+
+    ENGINE -->|"unmask()"| TOKEN
+    TOKEN --> CRYPTO
+    CRYPTO --> STORAGE
+
+    ENGINE -.->|"redact()<br/>No encryption<br/>No storage"| ENGINE
 ```
 
 ### Components
