@@ -48,7 +48,7 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://example.com/innowave360/pii-shield"
+Repository = "https://github.com/musaib-js/pii-protect"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -33,8 +33,8 @@ import logging
 import re
 from typing import Optional
 
-from pii_shield.exceptions import OptionalDependencyMissingError
-from pii_shield.types import DetectedSpan, EntityType
+from pii_protect.exceptions import OptionalDependencyMissingError
+from pii_protect.types import DetectedSpan, EntityType
 
 logger = logging.getLogger(__name__)
 
@@ -67,15 +67,21 @@ class RegexPatternLibrary:
     SORT_CODE    = re.compile(r"\b\d{2}-\d{2}-\d{2}\b")
     ROUTING_NUM  = re.compile(r"\b\d{9}\b")  # ABA routing (must be contextualised)
     CREDIT_CARD  = re.compile(r"\b(?:\d[ -]?){13,16}\b")
+    UPI          = re.compile(r"\b[\w.-]+@[\w.-]+\b")  # UPI ID (India)
 
     # Contact
     EMAIL        = re.compile(r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b")
     PHONE_IN     = re.compile(r"(?:\+91|0)?[6-9]\d{9}")  # India mobile
     PHONE_INTL   = re.compile(r"\+\d{1,3}[\s\-]?\(?\d{1,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{3,4}")
+    PHONE_WITH_SPACES = re.compile(r"\b(?:\+\d{1,3}[-.\s]?)?\(?(?:\d{3})\)?[-.\s]?\d{3}[-.\s]?\d{4}\b")
 
     # Invoice / document references
     INVOICE_REF  = re.compile(r"\b(?:Invoice|Inv)\.?\s*(?:No\.?|Number|#|:)?\s*:?\s*[A-Z0-9\-/]{4,20}\b", re.IGNORECASE)
     PO_REF       = re.compile(r"\b(?:PO|Purchase\s*Order)\.?\s*(?:No\.?|Number|#|:)?\s*:?\s*[A-Z0-9\-/]{4,20}\b", re.IGNORECASE)
+    
+    # URL
+    URL          = re.compile(r"\bhttps?://[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
+    URL_WITHOUT_PROTOCOL = re.compile(r"\b(?:www\.)[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
 
     PATTERNS: list[tuple[re.Pattern, EntityType, float]] = []
 

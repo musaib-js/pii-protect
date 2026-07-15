@@ -26,8 +26,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from pii_shield.storage.base import StorageBackend
-from pii_shield.types import TokenRecord
+from pii_protect.storage.base import StorageBackend
+from pii_protect.types import TokenRecord
 
 
 def _b64e(data: bytes) -> str:

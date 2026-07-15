@@ -6,7 +6,7 @@ Multi-layer NER detection engine (regex / spaCy / privacy-filter transformer).
 Author: Musaib Altaf
 """
 
-from pii_shield.ner.engine import (
+from pii_protect.ner.engine import (
     NEREngine,
     PrivacyFilterLayer,
     RegexNERLayer,

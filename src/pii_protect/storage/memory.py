@@ -14,8 +14,8 @@ from __future__ import annotations
 import asyncio
 from typing import Optional
 
-from pii_shield.storage.base import StorageBackend
-from pii_shield.types import TokenRecord
+from pii_protect.storage.base import StorageBackend
+from pii_protect.types import TokenRecord
 
 
 class InMemoryStorage(StorageBackend):

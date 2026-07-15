@@ -14,11 +14,11 @@ connect() one of those backends.
 Author: Musaib Altaf
 """
 
-from pii_shield.storage.base import StorageBackend
-from pii_shield.storage.filesystem import FileSystemStorage
-from pii_shield.storage.memory import InMemoryStorage
-from pii_shield.storage.postgres import PostgresStorage
-from pii_shield.storage.redis_backend import RedisStorage
+from pii_protect.storage.base import StorageBackend
+from pii_protect.storage.filesystem import FileSystemStorage
+from pii_protect.storage.memory import InMemoryStorage
+from pii_protect.storage.postgres import PostgresStorage
+from pii_protect.storage.redis_backend import RedisStorage
 
 __all__ = [
     "StorageBackend",

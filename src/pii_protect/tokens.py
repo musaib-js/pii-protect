@@ -27,7 +27,7 @@ import os
 import re
 from typing import Optional
 
-from pii_shield.types import EntityType
+from pii_protect.types import EntityType
 
 # Chars allowed in token suffix: lowercase hex only (URL-safe, no ambiguity)
 _SUFFIX_CHARS = "0123456789abcdef"

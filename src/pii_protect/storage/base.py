@@ -18,7 +18,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from pii_shield.types import TokenRecord
+from pii_protect.types import TokenRecord
 
 
 class StorageBackend(ABC):

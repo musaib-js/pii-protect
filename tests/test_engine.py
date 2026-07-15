@@ -11,9 +11,9 @@ Author: Musaib Altaf
 import pytest
 import logging
 
-from pii_shield import PIIMaskingEngine
-from pii_shield.crypto import AESGCMCipher
-from pii_shield.storage import FileSystemStorage, InMemoryStorage
+from pii_protect import PIIMaskingEngine
+from pii_protect.crypto import AESGCMCipher
+from pii_protect.storage import FileSystemStorage, InMemoryStorage
 
 SAMPLE_TEXT = "Contact john.doe@acme.com or +919812345678 about GST 27AAPFU0939F1ZV."
 FIXED_KEY = AESGCMCipher.generate_key()

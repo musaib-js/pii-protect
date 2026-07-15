@@ -17,9 +17,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pii_shield.exceptions import OptionalDependencyMissingError
-from pii_shield.storage.base import StorageBackend
-from pii_shield.types import TokenRecord
+from pii_protect.exceptions import OptionalDependencyMissingError
+from pii_protect.storage.base import StorageBackend
+from pii_protect.types import TokenRecord
 
 _DEFAULT_SCHEMA = "pii_shield"
 

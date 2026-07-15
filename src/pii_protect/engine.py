@@ -27,12 +27,12 @@ import json
 import logging
 from typing import Any, Optional
 
-from pii_shield.crypto import AESGCMCipher
-from pii_shield.exceptions import EngineNotInitialisedError
-from pii_shield.ner import NEREngine
-from pii_shield.storage.base import StorageBackend
-from pii_shield.tokens import DeterministicTokenGenerator
-from pii_shield.types import DetectedEntityInfo, MaskResult, UnmaskResult
+from pii_protect.crypto import AESGCMCipher
+from pii_protect.exceptions import EngineNotInitialisedError
+from pii_protect.ner import NEREngine
+from pii_protect.storage.base import StorageBackend
+from pii_protect.tokens import DeterministicTokenGenerator
+from pii_protect.types import DetectedEntityInfo, MaskResult, UnmaskResult
 
 logger = logging.getLogger(__name__)
 
@@ -294,7 +294,7 @@ class PIIMaskingEngine:
         aad = entity_type.value.encode("utf-8")
         ct = self._cipher.encrypt(plaintext, aad)
 
-        from pii_shield.types import TokenRecord
+        from pii_protect.types import TokenRecord
 
         record = TokenRecord(
             token_value=token_value,

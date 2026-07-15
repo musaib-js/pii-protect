@@ -26,7 +26,7 @@ from typing import NamedTuple
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from pii_shield.exceptions import DecryptionError
+from pii_protect.exceptions import DecryptionError
 
 logger = logging.getLogger(__name__)
 
