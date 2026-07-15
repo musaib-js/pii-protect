@@ -26,13 +26,14 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any, Optional
+from copy import deepcopy
 
 from pii_protect.crypto import AESGCMCipher
 from pii_protect.exceptions import EngineNotInitialisedError
 from pii_protect.ner import NEREngine
 from pii_protect.storage.base import StorageBackend
 from pii_protect.tokens import DeterministicTokenGenerator
-from pii_protect.types import DetectedEntityInfo, MaskResult, UnmaskResult
+from pii_protect.types import DetectedEntityInfo, MaskResult, UnmaskResult, EntityType
 
 logger = logging.getLogger(__name__)
 
@@ -158,17 +159,23 @@ class PIIMaskingEngine:
         result_text = text
         for span in sorted(spans, key=lambda s: s.start, reverse=True):
             token_value = await self._store_span(span.text, span.entity_type, scope)
-            result_text = result_text[: span.start] + token_value + result_text[span.end :]
+            result_text = (
+                result_text[: span.start] + token_value + result_text[span.end :]
+            )
 
-            entities.append(DetectedEntityInfo(
-                entity_type=span.entity_type.value,
-                start=span.start,
-                end=span.end,
-                token=token_value,
-                confidence=span.confidence,
-                source=span.source,
-            ))
-            entity_counts[span.entity_type.value] = entity_counts.get(span.entity_type.value, 0) + 1
+            entities.append(
+                DetectedEntityInfo(
+                    entity_type=span.entity_type.value,
+                    start=span.start,
+                    end=span.end,
+                    token=token_value,
+                    confidence=span.confidence,
+                    source=span.source,
+                )
+            )
+            entity_counts[span.entity_type.value] = (
+                entity_counts.get(span.entity_type.value, 0) + 1
+            )
 
         entities.reverse()  # restore left-to-right order (we iterated right-to-left)
         return MaskResult(
@@ -190,6 +197,56 @@ class PIIMaskingEngine:
         json_str = json.dumps(data, default=str)
         result = await self.mask(json_str, scope=scope)
         return json.loads(result.masked_text)
+
+    async def mask_dict_with_known_pii_keys(
+    self,
+    data: dict,
+    pii_keys: list[str],
+    scope: Optional[str] = None,
+) -> dict:
+        """
+        Recursively traverse a dict/list structure and mask the values of keys
+        present in ``pii_keys``.
+
+        Only the values of matching keys are masked. The structure is preserved.
+        """
+        self._assert_initialised()
+
+        pii_keys = set(pii_keys)
+
+        async def _walk(obj: Any) -> Any:
+            if isinstance(obj, dict):
+                result = {}
+
+                for key, value in obj.items():
+                    if key in pii_keys:
+                        if value is None:
+                            result[key] = None
+                        else:
+                            plaintext = (
+                                value
+                                if isinstance(value, str)
+                                else json.dumps(value, default=str)
+                                if isinstance(value, (dict, list))
+                                else str(value)
+                            )
+
+                            result[key] = await self._store_span(
+                                plaintext=plaintext,
+                                entity_type=EntityType.CUSTOM,
+                                scope=scope,
+                            )
+                    else:
+                        result[key] = await _walk(value)
+
+                return result
+
+            if isinstance(obj, list):
+                return [await _walk(item) for item in obj]
+
+            return obj
+
+        return await _walk(deepcopy(data))
 
     # ── Unmask (reverses mask) ───────────────────────────────────────────
 
@@ -244,6 +301,49 @@ class PIIMaskingEngine:
         unmasked = await self.unmask(json_str, scope=scope, actor=actor)
         return json.loads(unmasked)
 
+    async def unmask_dict_with_known_pii_keys(
+        self,
+        data: dict,
+        pii_keys: list[str],
+        scope: Optional[str] = None,
+        actor: Optional[str] = None,
+    ) -> dict:
+        """
+        Reverse ``mask_dict_with_known_pii_keys()`` by unmasking the values of the
+        specified keys.
+        """
+        self._assert_initialised()
+
+        pii_keys = set(pii_keys)
+
+        async def _walk(obj: Any) -> Any:
+            if isinstance(obj, dict):
+                result = {}
+
+                for key, value in obj.items():
+                    if key in pii_keys:
+                        if value is None:
+                            result[key] = None
+                        elif isinstance(value, str):
+                            result[key] = await self.unmask(
+                                value,
+                                scope=scope,
+                                actor=actor,
+                            )
+                        else:
+                            result[key] = value
+                    else:
+                        result[key] = await _walk(value)
+
+                return result
+
+            if isinstance(obj, list):
+                return [await _walk(item) for item in obj]
+
+            return obj
+
+        return await _walk(deepcopy(data))
+
     # ── Redact (irreversible) ────────────────────────────────────────────
 
     def redact(self, text: str) -> str:
@@ -280,7 +380,9 @@ class PIIMaskingEngine:
 
     # ── Internal ──────────────────────────────────────────────────────────
 
-    async def _store_span(self, plaintext: str, entity_type: Any, scope: Optional[str]) -> str:
+    async def _store_span(
+        self, plaintext: str, entity_type: Any, scope: Optional[str]
+    ) -> str:
         """Encrypt and persist one detected span, deduplicating within scope."""
         value_hash = self._token_gen.compute_value_hash(plaintext)
 
@@ -316,7 +418,9 @@ class PIIMaskingEngine:
         self._assert_initialised()
         token_positions = self._token_gen.find_tokens_in_text(masked_text)
         if not token_positions:
-            return UnmaskResult(text=masked_text, tokens_resolved=0, tokens_unresolved=0)
+            return UnmaskResult(
+                text=masked_text, tokens_resolved=0, tokens_unresolved=0
+            )
 
         unique_tokens = list({t for _, _, t in token_positions})
         records = await self._storage.get_many(unique_tokens)
@@ -324,9 +428,13 @@ class PIIMaskingEngine:
         resolved: dict[str, str] = {}
         for token_value, record in records.items():
             aad = record.entity_type.encode("utf-8")
-            resolved[token_value] = self._cipher.decrypt(record.ciphertext, record.iv, record.tag, aad)
+            resolved[token_value] = self._cipher.decrypt(
+                record.ciphertext, record.iv, record.tag, aad
+            )
             await self._storage.touch(token_value)
-            await self._storage.log_access(token_value, "UNMASK", actor or self._actor, scope)
+            await self._storage.log_access(
+                token_value, "UNMASK", actor or self._actor, scope
+            )
 
         result_text = masked_text
         unresolved_count = 0
@@ -335,7 +443,9 @@ class PIIMaskingEngine:
                 result_text = result_text[:start] + resolved[token] + result_text[end:]
             else:
                 unresolved_count += 1
-                result_text = result_text[:start] + f"{token}[UNRESOLVED]" + result_text[end:]
+                result_text = (
+                    result_text[:start] + f"{token}[UNRESOLVED]" + result_text[end:]
+                )
 
         return UnmaskResult(
             text=result_text,

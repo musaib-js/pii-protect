@@ -46,6 +46,7 @@ class EntityType(str, Enum):
     OTHER           = "OTHER"
     UPI             = "UPI"
     URL             = "URL"
+    CUSTOM = "CUSTOM"
     
 
 

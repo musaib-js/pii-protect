@@ -83,6 +83,175 @@ async def test_engine_without_context_manager():
     engine = PIIMaskingEngine(storage=InMemoryStorage(), encryption_key=FIXED_KEY)
     await engine.initialise()
     result = await engine.mask(SAMPLE_TEXT)
+    assert result.token_count > 0
+    assert "john.doe@acme.com" not in result.masked_text
+    assert "{{EMAIL:" in result.masked_text
     restored = await engine.unmask(result.masked_text)
     assert restored == SAMPLE_TEXT  
     
+    
+@pytest.mark.asyncio
+async def test_mask_dict_with_known_pii_keys_simple():
+    data = {
+        "vendor_name": "Acme Industries",
+        "invoice_number": "INV-001",
+        "amount": 1500,
+    }
+
+    async with PIIMaskingEngine(
+        storage=InMemoryStorage(),
+        encryption_key=FIXED_KEY,
+    ) as engine:
+        masked = await engine.mask_dict_with_known_pii_keys(
+            data,
+            pii_keys=["vendor_name"],
+        )
+
+        assert masked["vendor_name"] != data["vendor_name"]
+        assert "{{" in masked["vendor_name"]
+
+        assert masked["invoice_number"] == data["invoice_number"]
+        assert masked["amount"] == data["amount"]
+
+        restored = await engine.unmask_dict_with_known_pii_keys(
+            masked,
+            pii_keys=["vendor_name"],
+        )
+
+        assert restored == data
+
+
+@pytest.mark.asyncio
+async def test_mask_dict_with_known_pii_keys_nested():
+    data = {
+        "invoice": {
+            "vendor_name": "Acme Industries",
+            "gst_number": "27AAPFU0939F1ZV",
+        },
+        "metadata": {
+            "created_by": "system",
+        },
+    }
+
+    async with PIIMaskingEngine(
+        storage=InMemoryStorage(),
+        encryption_key=FIXED_KEY,
+    ) as engine:
+
+        masked = await engine.mask_dict_with_known_pii_keys(
+            data,
+            pii_keys=["vendor_name", "gst_number"],
+        )
+
+        assert "{{" in masked["invoice"]["vendor_name"]
+        assert "{{" in masked["invoice"]["gst_number"]
+        assert masked["metadata"]["created_by"] == "system"
+
+        restored = await engine.unmask_dict_with_known_pii_keys(
+            masked,
+            pii_keys=["vendor_name", "gst_number"],
+        )
+
+        assert restored == data
+
+
+@pytest.mark.asyncio
+async def test_mask_dict_with_known_pii_keys_inside_list():
+    data = {
+        "vendors": [
+            {
+                "vendor_name": "ABC Pvt Ltd",
+                "amount": 100,
+            },
+            {
+                "vendor_name": "XYZ Pvt Ltd",
+                "amount": 200,
+            },
+        ]
+    }
+
+    async with PIIMaskingEngine(
+        storage=InMemoryStorage(),
+        encryption_key=FIXED_KEY,
+    ) as engine:
+
+        masked = await engine.mask_dict_with_known_pii_keys(
+            data,
+            pii_keys=["vendor_name"],
+        )
+
+        assert "{{" in masked["vendors"][0]["vendor_name"]
+        assert "{{" in masked["vendors"][1]["vendor_name"]
+
+        assert masked["vendors"][0]["amount"] == 100
+        assert masked["vendors"][1]["amount"] == 200
+
+        restored = await engine.unmask_dict_with_known_pii_keys(
+            masked,
+            pii_keys=["vendor_name"],
+        )
+
+        assert restored == data
+
+
+@pytest.mark.asyncio
+async def test_mask_dict_with_known_pii_keys_deeply_nested():
+    data = {
+        "a": {
+            "b": [
+                {
+                    "c": {
+                        "vendor_name": "Deep Vendor",
+                    }
+                }
+            ]
+        }
+    }
+
+    async with PIIMaskingEngine(
+        storage=InMemoryStorage(),
+        encryption_key=FIXED_KEY,
+    ) as engine:
+
+        masked = await engine.mask_dict_with_known_pii_keys(
+            data,
+            pii_keys=["vendor_name"],
+        )
+
+        assert "{{" in masked["a"]["b"][0]["c"]["vendor_name"]
+
+        restored = await engine.unmask_dict_with_known_pii_keys(
+            masked,
+            pii_keys=["vendor_name"],
+        )
+
+        assert restored == data
+
+
+@pytest.mark.asyncio
+async def test_mask_dict_with_known_pii_keys_deduplicates():
+    data = {
+        "vendor_name": "Acme Pvt Ltd",
+        "nested": {
+            "vendor_name": "Acme Pvt Ltd",
+        },
+    }
+
+    async with PIIMaskingEngine(
+        storage=InMemoryStorage(),
+        encryption_key=FIXED_KEY,
+    ) as engine:
+
+        masked = await engine.mask_dict_with_known_pii_keys(
+            data,
+            pii_keys=["vendor_name"],
+        )
+
+        assert masked["vendor_name"] == masked["nested"]["vendor_name"]
+
+        restored = await engine.unmask_dict_with_known_pii_keys(
+            masked,
+            pii_keys=["vendor_name"],
+        )
+
+        assert restored == data
