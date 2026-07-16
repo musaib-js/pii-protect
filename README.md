@@ -25,6 +25,7 @@ pip install pii-protect                      # core: regex detection + in-memory
 pip install "pii-protect[postgres]"           # + PostgreSQL storage backend
 pip install "pii-protect[redis]"              # + Redis storage backend
 pip install "pii-protect[spacy]"              # + spaCy NER layer (PERSON/ORG/GPE)
+pip install "pii-protect[gliner]"              # + GLiner NER layer
 pip install "pii-protect[privacy-filter]"     # + transformer token-classification layer
 pip install "pii-protect[all]"                # everything
 ```
@@ -154,12 +155,14 @@ flowchart TD
 
     subgraph NER["NEREngine (pii_protect.ner)"]
         REGEX["RegexNERLayer<br/>(always on)"]
+        GLINER["GLiNer Layer<br/>(optional)"]
         SPACY["SpacyNERLayer<br/>(optional)"]
         PRIV["PrivacyFilterLayer<br/>(optional)"]
         MERGER["TokenizerSafeSpanMerger"]
         RESOLVER["SpanConflictResolver"]
 
         REGEX --> MERGER
+        GLINER --> MERGER
         SPACY --> MERGER
         PRIV --> MERGER
         MERGER --> RESOLVER
@@ -206,6 +209,7 @@ merges their output into a single non-overlapping span list:
   (India + international), invoice and PO references.
 - `SpacyNERLayer` — optional. Adds PERSON / ORGANISATION / ADDRESS
   detection via a local spaCy model. Requires `pii-protect[spacy]`.
+- `GLiNERLayer` — optional. Adds better and more efficient NER detection `pii-protect[gliner]`.
 - `PrivacyFilterLayer` — optional. Adds detection via any HuggingFace
   token-classification model you point it at, run entirely on-premise
   through `transformers.pipeline`. Requires `pii-protect[privacy-filter]`.
@@ -297,6 +301,7 @@ from pii_protect.storage import InMemoryStorage
 
 ner = NEREngine(
     enable_spacy=True,                 # PERSON / ORGANISATION / ADDRESS
+    enable_gliner=True,                # Better NER detection
     spacy_model="en_core_web_sm",
     enable_privacy_filter=True,        # any HF token-classification model
     privacy_filter_model="your/token-classification-model",

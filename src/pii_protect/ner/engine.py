@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 #  Layer 1: Regex patterns
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class RegexPatternLibrary:
     """
     High-precision regex patterns for structured PII entities.
@@ -52,35 +53,50 @@ class RegexPatternLibrary:
     """
 
     # India-specific
-    GST_NUMBER   = re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}\b")
-    PAN_NUMBER   = re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]{1}\b")
-    TAN_NUMBER   = re.compile(r"\b[A-Z]{4}[0-9]{5}[A-Z]{1}\b")
+    GST_NUMBER = re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}\b")
+    PAN_NUMBER = re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]{1}\b")
+    TAN_NUMBER = re.compile(r"\b[A-Z]{4}[0-9]{5}[A-Z]{1}\b")
 
     # International tax
-    ABN_NUMBER   = re.compile(r"\bABN\s*:?\s*\d{2}\s*\d{3}\s*\d{3}\s*\d{3}\b", re.IGNORECASE)
-    VAT_EU       = re.compile(r"\b[A-Z]{2}\d{8,12}\b")
+    ABN_NUMBER = re.compile(
+        r"\bABN\s*:?\s*\d{2}\s*\d{3}\s*\d{3}\s*\d{3}\b", re.IGNORECASE
+    )
+    VAT_EU = re.compile(r"\b[A-Z]{2}\d{8,12}\b")
 
     # Banking / financial
-    IBAN         = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{1,30}\b")
-    SWIFT_BIC    = re.compile(r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?\b")
-    ACCOUNT_NUM  = re.compile(r"\b(?:A/c|Account|Acc\.?)\s*(?:No\.?|Number)?\s*:?\s*[\d\s\-]{6,20}\b", re.IGNORECASE)
-    SORT_CODE    = re.compile(r"\b\d{2}-\d{2}-\d{2}\b")
-    ROUTING_NUM  = re.compile(r"\b\d{9}\b")  # ABA routing (must be contextualised)
-    CREDIT_CARD  = re.compile(r"\b(?:\d[ -]?){13,16}\b")
-    UPI          = re.compile(r"\b[\w.-]+@[\w.-]+\b")  # UPI ID (India)
+    IBAN = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{1,30}\b")
+    SWIFT_BIC = re.compile(r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?\b")
+    ACCOUNT_NUM = re.compile(
+        r"\b(?:A/c|Account|Acc\.?)\s*(?:No\.?|Number)?\s*:?\s*[\d\s\-]{6,20}\b",
+        re.IGNORECASE,
+    )
+    SORT_CODE = re.compile(r"\b\d{2}-\d{2}-\d{2}\b")
+    ROUTING_NUM = re.compile(r"\b\d{9}\b")  # ABA routing (must be contextualised)
+    CREDIT_CARD = re.compile(r"\b(?:\d[ -]?){13,16}\b")
+    UPI = re.compile(r"\b[\w.-]+@[\w.-]+\b")  # UPI ID (India)
 
     # Contact
-    EMAIL        = re.compile(r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b")
-    PHONE_IN     = re.compile(r"(?:\+91|0)?[6-9]\d{9}")  # India mobile
-    PHONE_INTL   = re.compile(r"\+\d{1,3}[\s\-]?\(?\d{1,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{3,4}")
-    PHONE_WITH_SPACES = re.compile(r"\b(?:\+\d{1,3}[-.\s]?)?\(?(?:\d{3})\)?[-.\s]?\d{3}[-.\s]?\d{4}\b")
+    EMAIL = re.compile(r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b")
+    PHONE_IN = re.compile(r"(?:\+91|0)?[6-9]\d{9}")  # India mobile
+    PHONE_INTL = re.compile(
+        r"\+\d{1,3}[\s\-]?\(?\d{1,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{3,4}"
+    )
+    PHONE_WITH_SPACES = re.compile(
+        r"\b(?:\+\d{1,3}[-.\s]?)?\(?(?:\d{3})\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"
+    )
 
     # Invoice / document references
-    INVOICE_REF  = re.compile(r"\b(?:Invoice|Inv)\.?\s*(?:No\.?|Number|#|:)?\s*:?\s*[A-Z0-9\-/]{4,20}\b", re.IGNORECASE)
-    PO_REF       = re.compile(r"\b(?:PO|Purchase\s*Order)\.?\s*(?:No\.?|Number|#|:)?\s*:?\s*[A-Z0-9\-/]{4,20}\b", re.IGNORECASE)
-    
+    INVOICE_REF = re.compile(
+        r"\b(?:Invoice|Inv)\.?\s*(?:No\.?|Number|#|:)?\s*:?\s*[A-Z0-9\-/]{4,20}\b",
+        re.IGNORECASE,
+    )
+    PO_REF = re.compile(
+        r"\b(?:PO|Purchase\s*Order)\.?\s*(?:No\.?|Number|#|:)?\s*:?\s*[A-Z0-9\-/]{4,20}\b",
+        re.IGNORECASE,
+    )
+
     # URL
-    URL          = re.compile(r"\bhttps?://[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
+    URL = re.compile(r"\bhttps?://[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
     URL_WITHOUT_PROTOCOL = re.compile(r"\b(?:www\.)[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
 
     PATTERNS: list[tuple[re.Pattern, EntityType, float]] = []
@@ -88,25 +104,25 @@ class RegexPatternLibrary:
     @classmethod
     def _build_pattern_list(cls) -> None:
         cls.PATTERNS = [
-            (cls.GST_NUMBER,  EntityType.GST,            0.99),
-            (cls.PAN_NUMBER,  EntityType.PAN,            0.97),
-            (cls.TAN_NUMBER,  EntityType.TAN,            0.92),
-            (cls.ABN_NUMBER,  EntityType.ABN,            0.96),
-            (cls.VAT_EU,      EntityType.VAT,            0.85),
-            (cls.IBAN,        EntityType.IBAN,           0.90),
-            (cls.SWIFT_BIC,   EntityType.SWIFT,          0.88),
-            (cls.ACCOUNT_NUM, EntityType.ACCOUNT,        0.88),
-            (cls.SORT_CODE,   EntityType.SORT_CODE,      0.80),
-            (cls.CREDIT_CARD, EntityType.CREDIT_CARD,    0.85),
-            (cls.UPI,         EntityType.UPI,            0.80),
-            (cls.EMAIL,       EntityType.EMAIL,          0.99),
-            (cls.PHONE_IN,    EntityType.PHONE,          0.95),
-            (cls.PHONE_INTL,  EntityType.PHONE,          0.90),
-            (cls.PHONE_WITH_SPACES, EntityType.PHONE,    0.85),
+            (cls.GST_NUMBER, EntityType.GST, 0.99),
+            (cls.PAN_NUMBER, EntityType.PAN, 0.97),
+            (cls.TAN_NUMBER, EntityType.TAN, 0.92),
+            (cls.ABN_NUMBER, EntityType.ABN, 0.96),
+            (cls.VAT_EU, EntityType.VAT, 0.85),
+            (cls.IBAN, EntityType.IBAN, 0.90),
+            (cls.SWIFT_BIC, EntityType.SWIFT, 0.88),
+            (cls.ACCOUNT_NUM, EntityType.ACCOUNT, 0.88),
+            (cls.SORT_CODE, EntityType.SORT_CODE, 0.80),
+            (cls.CREDIT_CARD, EntityType.CREDIT_CARD, 0.85),
+            (cls.UPI, EntityType.UPI, 0.80),
+            (cls.EMAIL, EntityType.EMAIL, 0.99),
+            (cls.PHONE_IN, EntityType.PHONE, 0.95),
+            (cls.PHONE_INTL, EntityType.PHONE, 0.90),
+            (cls.PHONE_WITH_SPACES, EntityType.PHONE, 0.85),
             (cls.INVOICE_REF, EntityType.INVOICE_NUMBER, 0.80),
-            (cls.PO_REF,      EntityType.PO_NUMBER,      0.80),
-            (cls.URL,         EntityType.URL,            0.85),
-            (cls.URL_WITHOUT_PROTOCOL, EntityType.URL,   0.80),
+            (cls.PO_REF, EntityType.PO_NUMBER, 0.80),
+            (cls.URL, EntityType.URL, 0.85),
+            (cls.URL_WITHOUT_PROTOCOL, EntityType.URL, 0.80),
         ]
 
 
@@ -133,16 +149,173 @@ class RegexNERLayer:
         spans: list[DetectedSpan] = []
         for pattern, entity_type, confidence in RegexPatternLibrary.PATTERNS:
             for match in pattern.finditer(text):
-                spans.append(DetectedSpan(
-                    start=match.start(),
-                    end=match.end(),
-                    text=match.group(),
-                    entity_type=entity_type,
-                    confidence=confidence,
-                    source="regex",
-                    is_regex_validated=True,
-                ))
+                spans.append(
+                    DetectedSpan(
+                        start=match.start(),
+                        end=match.end(),
+                        text=match.group(),
+                        entity_type=entity_type,
+                        confidence=confidence,
+                        source="regex",
+                        is_regex_validated=True,
+                    )
+                )
         return sorted(spans, key=lambda s: s.start)
+
+
+# Layer 1.1: GLiner NER Layer (optional dependency: pii-shield[gliner])
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Layer 2: GLiNER (optional dependency: pii-protect[gliner])
+# ─────────────────────────────────────────────────────────────────────────────
+
+_GLINER_TO_ENTITY = {
+    "person": EntityType.PERSON,
+    "organization": EntityType.ORGANISATION,
+    "company": EntityType.ORGANISATION,
+    "address": EntityType.ADDRESS,
+    "location": EntityType.ADDRESS,
+    "hospital": EntityType.ORGANISATION,
+    "school": EntityType.ORGANISATION,
+    "university": EntityType.ORGANISATION,
+    "passport": EntityType.PASSPORT,
+    "driving license": EntityType.DRIVING_LICENSE,
+    "username": EntityType.USERNAME,
+    "ifsc code": EntityType.IFSC,
+}
+
+
+class GLiNERLayer:
+    """
+    Layer 2: GLiNER zero-shot Named Entity Recognition.
+
+    Runs fully on-premise using the GLiNER model.
+
+    Requires the ``pii-protect[gliner]`` extra.
+    """
+
+    DEFAULT_LABELS = (
+        "person",
+        "organization",
+        "company",
+        "address",
+        "location",
+        "hospital",
+        "school",
+        "university",
+        "government organization",
+        "passport",
+        "driving license",
+        "username",
+        "customer name",
+        "vendor name",
+        "ifsc code",
+    )
+
+    def __init__(
+        self,
+        model_name: str = "gliner-community/gliner_small-v2.5",
+        threshold: float = 0.60,
+        labels: tuple[str, ...] | None = None,
+        max_chars_per_chunk: int = 4000,
+        local_files_only: bool = False,
+    ) -> None:
+        try:
+            from gliner import GLiNER
+        except ImportError as exc:
+            raise OptionalDependencyMissingError(
+                "GLiNERLayer",
+                "gliner",
+                "gliner",
+            ) from exc
+
+        logger.info("Loading GLiNER model: %s", model_name)
+
+        self._model = GLiNER.from_pretrained(
+            model_name,
+            local_files_only=local_files_only,
+        )
+
+        self._threshold = threshold
+        self._labels = labels or self.DEFAULT_LABELS
+        self._max_chars = max_chars_per_chunk
+
+        logger.info("GLiNER model loaded.")
+
+    def detect(self, text: str) -> list[DetectedSpan]:
+        """
+        Run GLiNER against the input text.
+        """
+        if not text.strip():
+            return []
+
+        spans: list[DetectedSpan] = []
+
+        chunks = self._chunk_text(text, self._max_chars)
+        offset = 0
+
+        for chunk in chunks:
+
+            entities = self._model.predict_entities(
+                chunk,
+                labels=self._labels,
+                threshold=self._threshold,
+            )
+
+            for entity in entities:
+
+                entity_type = _GLINER_TO_ENTITY.get(
+                    entity["label"].lower(),
+                    EntityType.OTHER,
+                )
+
+                spans.append(
+                    DetectedSpan(
+                        start=offset + entity["start"],
+                        end=offset + entity["end"],
+                        text=entity["text"],
+                        entity_type=entity_type,
+                        confidence=float(entity["score"]),
+                        source="gliner",
+                    )
+                )
+
+            offset += len(chunk)
+
+        return sorted(spans, key=lambda span: span.start)
+
+    def _chunk_text(
+        self,
+        text: str,
+        max_chars: int,
+    ) -> list[str]:
+        """
+        Split large documents while attempting to preserve sentence
+        and paragraph boundaries.
+        """
+        if len(text) <= max_chars:
+            return [text]
+
+        chunks: list[str] = []
+        start = 0
+
+        while start < len(text):
+
+            end = min(start + max_chars, len(text))
+
+            paragraph_break = text.rfind("\n\n", start, end)
+
+            if paragraph_break > start:
+                end = paragraph_break + 2
+            else:
+                sentence_break = text.rfind(". ", start, end)
+                if sentence_break > start:
+                    end = sentence_break + 2
+
+            chunks.append(text[start:end])
+            start = end
+
+        return chunks
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -150,11 +323,11 @@ class RegexNERLayer:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SPACY_TO_ENTITY = {
-    "PERSON":  EntityType.PERSON,
-    "ORG":     EntityType.ORGANISATION,
-    "GPE":     EntityType.ADDRESS,
-    "LOC":     EntityType.ADDRESS,
-    "FAC":     EntityType.ADDRESS,
+    "PERSON": EntityType.PERSON,
+    "ORG": EntityType.ORGANISATION,
+    "GPE": EntityType.ADDRESS,
+    "LOC": EntityType.ADDRESS,
+    "FAC": EntityType.ADDRESS,
 }
 
 
@@ -171,7 +344,9 @@ class SpacyNERLayer:
         try:
             import spacy
         except ImportError as exc:
-            raise OptionalDependencyMissingError("SpacyNERLayer", "spacy", "spacy") from exc
+            raise OptionalDependencyMissingError(
+                "SpacyNERLayer", "spacy", "spacy"
+            ) from exc
 
         logger.info("Loading spaCy model: %s", model_name)
         self._nlp = spacy.load(model_name, disable=["parser", "lemmatizer"])
@@ -197,14 +372,16 @@ class SpacyNERLayer:
             entity_type = _SPACY_TO_ENTITY.get(ent.label_)
             if entity_type is None:
                 continue
-            spans.append(DetectedSpan(
-                start=ent.start_char,
-                end=ent.end_char,
-                text=ent.text,
-                entity_type=entity_type,
-                confidence=0.75,   # spaCy doesn't expose per-ent confidence; fixed prior
-                source="spacy",
-            ))
+            spans.append(
+                DetectedSpan(
+                    start=ent.start_char,
+                    end=ent.end_char,
+                    text=ent.text,
+                    entity_type=entity_type,
+                    confidence=0.75,  # spaCy doesn't expose per-ent confidence; fixed prior
+                    source="spacy",
+                )
+            )
         return spans
 
 
@@ -213,14 +390,14 @@ class SpacyNERLayer:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _PRIVACY_FILTER_LABEL_TO_ENTITY = {
-    "private_person":  EntityType.PERSON,
+    "private_person": EntityType.PERSON,
     "private_address": EntityType.ADDRESS,
-    "private_email":   EntityType.EMAIL,
-    "private_phone":   EntityType.PHONE,
-    "account_number":  EntityType.ACCOUNT,
-    "private_url":     EntityType.OTHER,
-    "private_date":    EntityType.OTHER,
-    "secret":          EntityType.OTHER,
+    "private_email": EntityType.EMAIL,
+    "private_phone": EntityType.PHONE,
+    "account_number": EntityType.ACCOUNT,
+    "private_url": EntityType.OTHER,
+    "private_date": EntityType.OTHER,
+    "secret": EntityType.OTHER,
 }
 
 
@@ -266,7 +443,11 @@ class PrivacyFilterLayer:
                 "PrivacyFilterLayer", "privacy-filter", "transformers"
             ) from exc
 
-        logger.info("Loading transformer privacy-filter model: %s (device=%s)", model_name, device)
+        logger.info(
+            "Loading transformer privacy-filter model: %s (device=%s)",
+            model_name,
+            device,
+        )
         device_arg = -1 if device == "cpu" else device
         self._pipeline = hf_pipeline(
             task="token-classification",
@@ -310,14 +491,16 @@ class PrivacyFilterLayer:
                 entity_type = _PRIVACY_FILTER_LABEL_TO_ENTITY.get(
                     ent["entity_group"], EntityType.OTHER
                 )
-                all_spans.append(DetectedSpan(
-                    start=offset + ent["start"],
-                    end=offset + ent["end"],
-                    text=ent["word"],
-                    entity_type=entity_type,
-                    confidence=score,
-                    source="privacy_filter",
-                ))
+                all_spans.append(
+                    DetectedSpan(
+                        start=offset + ent["start"],
+                        end=offset + ent["end"],
+                        text=ent["word"],
+                        entity_type=entity_type,
+                        confidence=score,
+                        source="privacy_filter",
+                    )
+                )
             offset += len(chunk)
 
         return self._merger.merge(all_spans)
@@ -346,6 +529,7 @@ class PrivacyFilterLayer:
 # ─────────────────────────────────────────────────────────────────────────────
 #  Tokenizer-safe span merger  (B/I/E token boundary handling)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TokenizerSafeSpanMerger:
     """
@@ -380,7 +564,11 @@ class TokenizerSafeSpanMerger:
 
         for nxt in sorted_spans[1:]:
             gap = nxt.start - current.end
-            if nxt.entity_type == current.entity_type and nxt.source == current.source and gap <= 2:
+            if (
+                nxt.entity_type == current.entity_type
+                and nxt.source == current.source
+                and gap <= 2
+            ):
                 current = DetectedSpan(
                     start=current.start,
                     end=nxt.end,
@@ -388,7 +576,8 @@ class TokenizerSafeSpanMerger:
                     entity_type=current.entity_type,
                     confidence=max(current.confidence, nxt.confidence),
                     source=current.source,
-                    is_regex_validated=current.is_regex_validated or nxt.is_regex_validated,
+                    is_regex_validated=current.is_regex_validated
+                    or nxt.is_regex_validated,
                 )
             else:
                 merged.append(current)
@@ -529,6 +718,7 @@ class SpanConflictResolver:
 #  NEREngine  (public interface — composes all enabled layers)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class NEREngine:
     """
     Top-level NER engine composing regex, spaCy, and transformer
@@ -557,6 +747,9 @@ class NEREngine:
         self,
         enable_spacy: bool = False,
         spacy_model: str = "en_core_web_sm",
+        enable_gliner: bool = False,
+        gliner_model: str = "gliner-community/gliner_small-v2.5",
+        gliner_threshold: float = 0.60,
         enable_privacy_filter: bool = False,
         privacy_filter_model: Optional[str] = None,
         privacy_filter_threshold: float = 0.50,
@@ -586,10 +779,20 @@ class NEREngine:
         self._regex_layer = RegexNERLayer()
         self._spacy_layer = SpacyNERLayer(spacy_model) if enable_spacy else None
 
+        self._gliner_layer: Optional[GLiNERLayer] = None
+
+        if enable_gliner:
+            self._gliner_layer = GLiNERLayer(
+                model_name=gliner_model,
+                threshold=gliner_threshold,
+            )
+
         self._privacy_filter_layer: Optional[PrivacyFilterLayer] = None
         if enable_privacy_filter:
             if not privacy_filter_model:
-                raise ValueError("privacy_filter_model is required when enable_privacy_filter=True")
+                raise ValueError(
+                    "privacy_filter_model is required when enable_privacy_filter=True"
+                )
             self._privacy_filter_layer = PrivacyFilterLayer(
                 privacy_filter_model, privacy_filter_threshold, privacy_filter_device
             )
@@ -597,7 +800,8 @@ class NEREngine:
         self._merger = TokenizerSafeSpanMerger()
         self._resolver = SpanConflictResolver()
         logger.info(
-            "NEREngine ready (layers: regex, spacy=%s, privacy_filter=%s)",
+            "NEREngine ready (layers: regex, gliner=%s, spacy=%s, privacy_filter=%s)",
+            gliner_model if enable_gliner else "DISABLED",
             spacy_model if enable_spacy else "DISABLED",
             privacy_filter_model if enable_privacy_filter else "DISABLED",
         )
@@ -620,16 +824,27 @@ class NEREngine:
             return []
 
         regex_spans = self._regex_layer.detect(text)
+        gliner_spans = (
+            self._gliner_layer.detect(text)
+            if self._gliner_layer
+            else []
+        )
         spacy_spans = self._spacy_layer.detect(text) if self._spacy_layer else []
         privacy_filter_spans = (
-            self._privacy_filter_layer.detect(text) if self._privacy_filter_layer else []
+            self._privacy_filter_layer.detect(text)
+            if self._privacy_filter_layer
+            else []
         )
 
-        all_spans = regex_spans + spacy_spans + privacy_filter_spans
+        all_spans = regex_spans + gliner_spans + spacy_spans + privacy_filter_spans
         resolved = self._resolver.resolve(all_spans)
 
         logger.debug(
-            "NEREngine.detect: regex=%d spacy=%d privacy_filter=%d resolved=%d",
-            len(regex_spans), len(spacy_spans), len(privacy_filter_spans), len(resolved),
+            "NEREngine.detect: regex=%d gliner=%d spacy=%d privacy_filter=%d resolved=%d",
+            len(regex_spans),
+            len(gliner_spans),
+            len(spacy_spans),
+            len(privacy_filter_spans),
+            len(resolved),
         )
         return resolved

@@ -29,6 +29,7 @@ class EntityType(str, Enum):
     ACCOUNT         = "ACCOUNT"
     IBAN            = "IBAN"
     SWIFT           = "SWIFT"
+    IFSC            = "IFSC"
     TAX_ID          = "TAX_ID"
     GST             = "GST"
     PAN             = "PAN"
@@ -47,6 +48,9 @@ class EntityType(str, Enum):
     UPI             = "UPI"
     URL             = "URL"
     CUSTOM = "CUSTOM"
+    PASSPORT = "PASSPORT"
+    DRIVING_LICENSE = "DRIVING_LICENSE"
+    USERNAME = "USERNAME"
     
 
 

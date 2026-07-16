@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pii-protect"
-version = "0.1.6"
+version = "0.1.7"
 description = "Pluggable, on-premise-first PII masking, unmasking, and redaction library."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,11 +32,15 @@ dependencies = [
 postgres = ["asyncpg>=0.29.0"]
 redis = ["redis>=5.0.0"]
 spacy = ["spacy>=3.7.0"]
+gliner = [
+    "gliner>=0.2.22",
+]
 privacy-filter = ["transformers>=4.50.0", "torch>=2.0.0", "accelerate>=1.0", "safetensors>=0.4.0"]
 all = [
     "asyncpg>=0.29.0",
     "redis>=5.0.0",
     "spacy>=3.7.0",
+    "gliner>=0.2.22",
     "transformers>=4.50.0",
     "torch>=2.0.0",
     "accelerate>=1.0",
