@@ -56,6 +56,8 @@ class RegexPatternLibrary:
     GST_NUMBER = re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}\b")
     PAN_NUMBER = re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]{1}\b")
     TAN_NUMBER = re.compile(r"\b[A-Z]{4}[0-9]{5}[A-Z]{1}\b")
+    UEN_NUMBER = re.compile(r"\bUEN\d{9,10}[A-Z]\b")
+    CRN_NUMBER = re.compile(r"\bCRN-\d{6,}\b")
 
     # International tax
     ABN_NUMBER = re.compile(
@@ -64,12 +66,14 @@ class RegexPatternLibrary:
     VAT_EU = re.compile(r"\b[A-Z]{2}\d{8,12}\b")
 
     # Banking / financial
+    IFSC = re.compile(r"\b[A-Z]{4}0[A-Z0-9]{6}\b")
     IBAN = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{1,30}\b")
     SWIFT_BIC = re.compile(r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?\b")
     ACCOUNT_NUM = re.compile(
         r"\b(?:A/c|Account|Acc\.?)\s*(?:No\.?|Number)?\s*:?\s*[\d\s\-]{6,20}\b",
         re.IGNORECASE,
     )
+    ACCOUNT_NUM_HYPHENATED = re.compile(r"\b\d{3}-\d{5}-\d{1}\b")
     SORT_CODE = re.compile(r"\b\d{2}-\d{2}-\d{2}\b")
     ROUTING_NUM = re.compile(r"\b\d{9}\b")  # ABA routing (must be contextualised)
     CREDIT_CARD = re.compile(r"\b(?:\d[ -]?){13,16}\b")
@@ -84,7 +88,8 @@ class RegexPatternLibrary:
     PHONE_WITH_SPACES = re.compile(
         r"\b(?:\+\d{1,3}[-.\s]?)?\(?(?:\d{3})\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"
     )
-
+    PHONE_US = re.compile(r"(?:\+1-?)?(?:\d{3}[-.\s]?){2}\d{4}")
+    PHONE_LOCAL_US = re.compile(r"\d{3}[-.\s]?\d{4}")
     # Invoice / document references
     INVOICE_REF = re.compile(
         r"\b(?:Invoice|Inv)\.?\s*(?:No\.?|Number|#|:)?\s*:?\s*[A-Z0-9\-/]{4,20}\b",
@@ -98,6 +103,7 @@ class RegexPatternLibrary:
     # URL
     URL = re.compile(r"\bhttps?://[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
     URL_WITHOUT_PROTOCOL = re.compile(r"\b(?:www\.)[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
+    URL_FTP = re.compile(r"\bftp://[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
 
     PATTERNS: list[tuple[re.Pattern, EntityType, float]] = []
 
@@ -108,10 +114,14 @@ class RegexPatternLibrary:
             (cls.PAN_NUMBER, EntityType.PAN, 0.97),
             (cls.TAN_NUMBER, EntityType.TAN, 0.92),
             (cls.ABN_NUMBER, EntityType.ABN, 0.96),
+            (cls.UEN_NUMBER, EntityType.UEN, 0.90),
+            (cls.CRN_NUMBER, EntityType.CRN, 0.90),
             (cls.VAT_EU, EntityType.VAT, 0.85),
             (cls.IBAN, EntityType.IBAN, 0.90),
+            (cls.IFSC, EntityType.IFSC, 0.85),
             (cls.SWIFT_BIC, EntityType.SWIFT, 0.88),
             (cls.ACCOUNT_NUM, EntityType.ACCOUNT, 0.88),
+            (cls.ACCOUNT_NUM_HYPHENATED, EntityType.ACCOUNT, 0.85),
             (cls.SORT_CODE, EntityType.SORT_CODE, 0.80),
             (cls.CREDIT_CARD, EntityType.CREDIT_CARD, 0.85),
             (cls.UPI, EntityType.UPI, 0.80),
@@ -119,10 +129,13 @@ class RegexPatternLibrary:
             (cls.PHONE_IN, EntityType.PHONE, 0.95),
             (cls.PHONE_INTL, EntityType.PHONE, 0.90),
             (cls.PHONE_WITH_SPACES, EntityType.PHONE, 0.85),
+            (cls.PHONE_US, EntityType.PHONE, 0.85),
+            (cls.PHONE_LOCAL_US, EntityType.PHONE, 0.80),
             (cls.INVOICE_REF, EntityType.INVOICE_NUMBER, 0.80),
             (cls.PO_REF, EntityType.PO_NUMBER, 0.80),
             (cls.URL, EntityType.URL, 0.85),
             (cls.URL_WITHOUT_PROTOCOL, EntityType.URL, 0.80),
+            (cls.URL_FTP, EntityType.URL, 0.80),
         ]
 
 
@@ -215,7 +228,7 @@ class GLiNERLayer:
     def __init__(
         self,
         model_name: str = "gliner-community/gliner_small-v2.5",
-        threshold: float = 0.60,
+        threshold: float = 0.50,
         labels: tuple[str, ...] | None = None,
         max_chars_per_chunk: int = 4000,
         local_files_only: bool = False,

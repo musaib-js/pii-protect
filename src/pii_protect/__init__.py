@@ -56,7 +56,7 @@ from pii_protect.types import (
     UnmaskResult,
 )
 
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 
 __all__ = [
     "PIIMaskingEngine",

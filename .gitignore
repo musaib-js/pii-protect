@@ -5,3 +5,4 @@ __pycache__
 .pypirc
 /dist
 *.egg-info
+/scripts

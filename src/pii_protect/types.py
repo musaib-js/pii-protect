@@ -36,6 +36,8 @@ class EntityType(str, Enum):
     TAN             = "TAN"
     ABN             = "ABN"
     VAT             = "VAT"
+    CRN            = "CRN"
+    UEN            = "UEN"
     INVOICE_NUMBER  = "INVOICE_NUMBER"
     PO_NUMBER       = "PO_NUMBER"
     BANK_ACCOUNT    = "BANK_ACCOUNT"
