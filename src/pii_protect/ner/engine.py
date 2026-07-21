@@ -1,5 +1,5 @@
 """
-pii_shield.ner.engine
+pii_protect.ner.engine
 =======================
 Multi-layer NER engine for PII detection in free-text documents.
 
@@ -7,10 +7,13 @@ Detection layers (applied in order, results merged):
   1. Regex patterns      — high-precision pattern matching for structured PII
      (GST, PAN, IBAN, email, phone, account numbers, etc.). Always available,
      no extra dependencies.
-  2. spaCy NER            — lightweight on-premise model (e.g. en_core_web_sm)
+  2. GLiNER               — zero-shot on-premise NER (person/org/address/
+     passport/driving-license/username/etc.). Requires the
+     ``pii-shield[gliner]`` extra.
+  3. spaCy NER            — lightweight on-premise model (e.g. en_core_web_sm)
      for PERSON, ORG, GPE entity detection. Requires the ``pii-shield[spacy]``
      extra.
-  3. Transformer privacy filter — bidirectional token-classification model
+  4. Transformer privacy filter — bidirectional token-classification model
      run on-premise via a HuggingFace `transformers.pipeline`
      (task="token-classification", aggregation_strategy="simple"). Requires
      the ``pii-shield[privacy-filter]`` extra.
@@ -20,7 +23,8 @@ enabled layers and produces a deduplicated, non-overlapping span list.
 
 Design constraints:
   - No network calls during inference; any model weights are loaded once
-    at construction time from local/cached files.
+    at construction time from local/cached files (GLiNER/spaCy/transformer
+    layers default to offline-safe loading — see their constructors).
   - All processing is in-memory. No temp files.
   - Thread-safe: each call produces fresh outputs; models are read-only.
 
@@ -33,7 +37,7 @@ import logging
 import re
 from typing import Optional
 
-from pii_protect.exceptions import OptionalDependencyMissingError
+from pii_protect.exceptions import InvalidInputError, OptionalDependencyMissingError
 from pii_protect.types import DetectedSpan, EntityType
 
 logger = logging.getLogger(__name__)
@@ -42,6 +46,52 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 #  Layer 1: Regex patterns
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ISO 3166-1 alpha-2 country codes — used to validate the country-code
+# segment of a SWIFT/BIC candidate (positions 5-6) instead of accepting
+# any two uppercase letters, which false-positives on ordinary 8-letter
+# English words (see V-13 in the security review).
+_ISO_3166_ALPHA2 = frozenset("""
+AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL
+BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV
+CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD
+GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM
+IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK
+LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW
+MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR
+PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS
+ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG US UY UZ
+VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW
+""".split())
+
+# Common UPI (India) PSP handles — used to validate the suffix of a UPI ID
+# instead of accepting any "word@word" token, which false-positives on
+# ordinary internal identifiers like "user@internal" (see V-18).
+_UPI_HANDLES = (
+    "oksbi|ybl|okhdfcbank|okicici|okaxis|paytm|apl|ibl|axl|jio|freecharge|"
+    "rapl|yesbank|axisbank|sbi|hdfcbank|icici|kotak|indus|upi|okbizaxis|"
+    "idfcfirst|federal|cnrb|barodampay|pockets|airtel"
+)
+
+
+def _luhn_is_valid(digits: str) -> bool:
+    """
+    Validate a digit string against the Luhn checksum (used to filter the
+    CREDIT_CARD pattern — see V-12). Returns False for anything that isn't
+    a plausible card number, including sequences that merely look like one.
+    """
+    if not digits.isdigit() or not (13 <= len(digits) <= 19):
+        return False
+    total = 0
+    parity = len(digits) % 2
+    for i, ch in enumerate(digits):
+        d = int(ch)
+        if i % 2 == parity:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
 
 
 class RegexPatternLibrary:
@@ -56,17 +106,17 @@ class RegexPatternLibrary:
     GST_NUMBER = re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}\b")
     PAN_NUMBER = re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]{1}\b")
     TAN_NUMBER = re.compile(r"\b[A-Z]{4}[0-9]{5}[A-Z]{1}\b")
-    UEN_NUMBER = re.compile(r"\bUEN\d{9,10}[A-Z]\b")
-    CRN_NUMBER = re.compile(r"\bCRN-\d{6,}\b")
+    IFSC = re.compile(r"\b[A-Z]{4}0[A-Z0-9]{6}\b")
 
-    # International tax
+    # International tax / company registration
     ABN_NUMBER = re.compile(
         r"\bABN\s*:?\s*\d{2}\s*\d{3}\s*\d{3}\s*\d{3}\b", re.IGNORECASE
     )
     VAT_EU = re.compile(r"\b[A-Z]{2}\d{8,12}\b")
+    UEN_NUMBER = re.compile(r"\bUEN\d{9,10}[A-Z]\b")
+    CRN_NUMBER = re.compile(r"\bCRN-\d{6,}\b")
 
     # Banking / financial
-    IFSC = re.compile(r"\b[A-Z]{4}0[A-Z0-9]{6}\b")
     IBAN = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{1,30}\b")
     SWIFT_BIC = re.compile(r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?\b")
     ACCOUNT_NUM = re.compile(
@@ -75,21 +125,19 @@ class RegexPatternLibrary:
     )
     ACCOUNT_NUM_HYPHENATED = re.compile(r"\b\d{3}-\d{5}-\d{1}\b")
     SORT_CODE = re.compile(r"\b\d{2}-\d{2}-\d{2}\b")
-    ROUTING_NUM = re.compile(r"\b\d{9}\b")  # ABA routing (must be contextualised)
-    CREDIT_CARD = re.compile(r"\b(?:\d[ -]?){13,16}\b")
-    UPI = re.compile(r"\b[\w.-]+@[\w.-]+\b")  # UPI ID (India)
+    CREDIT_CARD = re.compile(r"\b(?:\d[ -]?){13,19}\b")
 
     # Contact
     EMAIL = re.compile(r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b")
-    PHONE_IN = re.compile(r"(?:\+91|0)?[6-9]\d{9}")  # India mobile
+    UPI = re.compile(rf"\b[\w.\-]{{2,64}}@(?:{_UPI_HANDLES})\b", re.IGNORECASE)
+    PHONE_IN = re.compile(r"\b(?:\+91|0)?[6-9]\d{9}\b")  # India mobile
     PHONE_INTL = re.compile(
         r"\+\d{1,3}[\s\-]?\(?\d{1,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{3,4}"
     )
-    PHONE_WITH_SPACES = re.compile(
-        r"\b(?:\+\d{1,3}[-.\s]?)?\(?(?:\d{3})\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"
-    )
-    PHONE_US = re.compile(r"(?:\+1-?)?(?:\d{3}[-.\s]?){2}\d{4}")
-    PHONE_LOCAL_US = re.compile(r"\d{3}[-.\s]?\d{4}")
+    PHONE_US = re.compile(
+        r"(?:\+1-?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b"
+    )  # requires a separator between all 3 groups
+
     # Invoice / document references
     INVOICE_REF = re.compile(
         r"\b(?:Invoice|Inv)\.?\s*(?:No\.?|Number|#|:)?\s*:?\s*[A-Z0-9\-/]{4,20}\b",
@@ -102,7 +150,7 @@ class RegexPatternLibrary:
 
     # URL
     URL = re.compile(r"\bhttps?://[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
-    URL_WITHOUT_PROTOCOL = re.compile(r"\b(?:www\.)[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
+    URL_NO_PROTOCOL = re.compile(r"\b(?:www\.)[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
     URL_FTP = re.compile(r"\bftp://[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
 
     PATTERNS: list[tuple[re.Pattern, EntityType, float]] = []
@@ -113,28 +161,34 @@ class RegexPatternLibrary:
             (cls.GST_NUMBER, EntityType.GST, 0.99),
             (cls.PAN_NUMBER, EntityType.PAN, 0.97),
             (cls.TAN_NUMBER, EntityType.TAN, 0.92),
+            (cls.IFSC, EntityType.IFSC, 0.90),
             (cls.ABN_NUMBER, EntityType.ABN, 0.96),
             (cls.UEN_NUMBER, EntityType.UEN, 0.90),
             (cls.CRN_NUMBER, EntityType.CRN, 0.90),
             (cls.VAT_EU, EntityType.VAT, 0.85),
             (cls.IBAN, EntityType.IBAN, 0.90),
-            (cls.IFSC, EntityType.IFSC, 0.85),
-            (cls.SWIFT_BIC, EntityType.SWIFT, 0.88),
+            (
+                cls.SWIFT_BIC,
+                EntityType.SWIFT,
+                0.88,
+            ),  # post-filtered by country code, see below
             (cls.ACCOUNT_NUM, EntityType.ACCOUNT, 0.88),
             (cls.ACCOUNT_NUM_HYPHENATED, EntityType.ACCOUNT, 0.85),
             (cls.SORT_CODE, EntityType.SORT_CODE, 0.80),
-            (cls.CREDIT_CARD, EntityType.CREDIT_CARD, 0.85),
-            (cls.UPI, EntityType.UPI, 0.80),
+            (
+                cls.CREDIT_CARD,
+                EntityType.CREDIT_CARD,
+                0.85,
+            ),  # post-filtered by Luhn, see below
             (cls.EMAIL, EntityType.EMAIL, 0.99),
+            (cls.UPI, EntityType.UPI, 0.85),
             (cls.PHONE_IN, EntityType.PHONE, 0.95),
             (cls.PHONE_INTL, EntityType.PHONE, 0.90),
-            (cls.PHONE_WITH_SPACES, EntityType.PHONE, 0.85),
             (cls.PHONE_US, EntityType.PHONE, 0.85),
-            (cls.PHONE_LOCAL_US, EntityType.PHONE, 0.80),
             (cls.INVOICE_REF, EntityType.INVOICE_NUMBER, 0.80),
             (cls.PO_REF, EntityType.PO_NUMBER, 0.80),
             (cls.URL, EntityType.URL, 0.85),
-            (cls.URL_WITHOUT_PROTOCOL, EntityType.URL, 0.80),
+            (cls.URL_NO_PROTOCOL, EntityType.URL, 0.80),
             (cls.URL_FTP, EntityType.URL, 0.80),
         ]
 
@@ -143,7 +197,30 @@ RegexPatternLibrary._build_pattern_list()
 
 
 class RegexNERLayer:
-    """Layer 1: regex-based entity detection. No optional dependencies."""
+    """
+    Layer 1: regex-based entity detection. No optional dependencies.
+
+    Two patterns get a semantic post-filter beyond the raw regex match,
+    because a shape match alone is too permissive:
+      - CREDIT_CARD candidates must pass a Luhn checksum (V-12): a
+        sequential or all-zero 13-19 digit run is not a real card number.
+      - SWIFT/BIC candidates must have a valid ISO 3166-1 country code in
+        positions 5-6 (V-13): otherwise ordinary 8-letter capitalised
+        English words (CHECKING, SHIPMENT, ...) match the shape too.
+
+    Note on PHONE patterns deliberately NOT included here: an earlier
+    bare-7-digit pattern (`\\d{3}[-.\\s]?\\d{4}`) was removed. It both
+    false-positived on ordinary business numerics (order numbers,
+    reference IDs) and — worse — sometimes matched only a *fragment* of
+    a longer spaced phone number, leaving real digits outside the match
+    unmasked while a "[REDACTED:PHONE]" marker sat right next to them,
+    which looked handled but wasn't (V-16/V-17). The remaining phone
+    patterns require a real separator/prefix structure. Bare-digit
+    phone formats without any separator or country code (e.g. a raw
+    10-digit run with no `+`/hyphen/space anywhere) are a known regex-
+    layer coverage gap — enable the spaCy/GLiNER/privacy-filter layers
+    for better recall on those.
+    """
 
     def detect(self, text: str) -> list[DetectedSpan]:
         """
@@ -162,11 +239,22 @@ class RegexNERLayer:
         spans: list[DetectedSpan] = []
         for pattern, entity_type, confidence in RegexPatternLibrary.PATTERNS:
             for match in pattern.finditer(text):
+                value = match.group()
+
+                if entity_type == EntityType.CREDIT_CARD:
+                    stripped = re.sub(r"[ \-]", "", value)
+                    if not _luhn_is_valid(stripped):
+                        continue
+
+                if entity_type == EntityType.SWIFT:
+                    if len(value) not in (8, 11) or value[4:6] not in _ISO_3166_ALPHA2:
+                        continue
+
                 spans.append(
                     DetectedSpan(
                         start=match.start(),
                         end=match.end(),
-                        text=match.group(),
+                        text=value,
                         entity_type=entity_type,
                         confidence=confidence,
                         source="regex",
@@ -176,10 +264,8 @@ class RegexNERLayer:
         return sorted(spans, key=lambda s: s.start)
 
 
-# Layer 1.1: GLiner NER Layer (optional dependency: pii-shield[gliner])
-
 # ─────────────────────────────────────────────────────────────────────────────
-#  Layer 2: GLiNER (optional dependency: pii-protect[gliner])
+#  Layer 2: GLiNER (optional dependency: pii-shield[gliner])
 # ─────────────────────────────────────────────────────────────────────────────
 
 _GLINER_TO_ENTITY = {
@@ -191,20 +277,29 @@ _GLINER_TO_ENTITY = {
     "hospital": EntityType.ORGANISATION,
     "school": EntityType.ORGANISATION,
     "university": EntityType.ORGANISATION,
+    "government organization": EntityType.ORGANISATION,
     "passport": EntityType.PASSPORT,
     "driving license": EntityType.DRIVING_LICENSE,
     "username": EntityType.USERNAME,
+    "customer name": EntityType.PERSON,
+    "vendor name": EntityType.ORGANISATION,
     "ifsc code": EntityType.IFSC,
 }
 
 
 class GLiNERLayer:
     """
-    Layer 2: GLiNER zero-shot Named Entity Recognition.
+    Layer 2: GLiNER zero-shot Named Entity Recognition, run fully on-premise.
 
-    Runs fully on-premise using the GLiNER model.
+    Requires the ``pii-shield[gliner]`` extra.
 
-    Requires the ``pii-protect[gliner]`` extra.
+    Model loading defaults to OFFLINE (``local_files_only=True``): if the
+    model weights aren't already cached locally, construction raises
+    immediately with a clear error rather than silently reaching out to
+    the Hub. Warm the cache ahead of time with
+    ``pii_protect.ner.prefetch.prefetch_gliner()``, called from whatever
+    provisioning step your application already uses (this library never
+    calls it automatically).
     """
 
     DEFAULT_LABELS = (
@@ -228,60 +323,46 @@ class GLiNERLayer:
     def __init__(
         self,
         model_name: str = "gliner-community/gliner_small-v2.5",
-        threshold: float = 0.50,
-        labels: tuple[str, ...] | None = None,
+        threshold: float = 0.55,
+        labels: Optional[tuple[str, ...]] = None,
         max_chars_per_chunk: int = 4000,
-        local_files_only: bool = False,
+        local_files_only: bool = True,
     ) -> None:
         try:
             from gliner import GLiNER
         except ImportError as exc:
             raise OptionalDependencyMissingError(
-                "GLiNERLayer",
-                "gliner",
-                "gliner",
+                "GLiNERLayer", "gliner", "gliner"
             ) from exc
 
-        logger.info("Loading GLiNER model: %s", model_name)
-
-        self._model = GLiNER.from_pretrained(
+        logger.info(
+            "Loading GLiNER model: %s (local_files_only=%s)",
             model_name,
-            local_files_only=local_files_only,
+            local_files_only,
         )
-
+        self._model = GLiNER.from_pretrained(
+            model_name, local_files_only=local_files_only
+        )
         self._threshold = threshold
         self._labels = labels or self.DEFAULT_LABELS
         self._max_chars = max_chars_per_chunk
-
         logger.info("GLiNER model loaded.")
 
     def detect(self, text: str) -> list[DetectedSpan]:
-        """
-        Run GLiNER against the input text.
-        """
+        """Run GLiNER against the input text."""
         if not text.strip():
             return []
 
         spans: list[DetectedSpan] = []
-
-        chunks = self._chunk_text(text, self._max_chars)
         offset = 0
-
-        for chunk in chunks:
-
+        for chunk in self._chunk_text(text, self._max_chars):
             entities = self._model.predict_entities(
-                chunk,
-                labels=self._labels,
-                threshold=self._threshold,
+                chunk, labels=self._labels, threshold=self._threshold
             )
-
             for entity in entities:
-
                 entity_type = _GLINER_TO_ENTITY.get(
-                    entity["label"].lower(),
-                    EntityType.OTHER,
+                    entity["label"].lower(), EntityType.OTHER
                 )
-
                 spans.append(
                     DetectedSpan(
                         start=offset + entity["start"],
@@ -292,47 +373,31 @@ class GLiNERLayer:
                         source="gliner",
                     )
                 )
-
             offset += len(chunk)
-
         return sorted(spans, key=lambda span: span.start)
 
-    def _chunk_text(
-        self,
-        text: str,
-        max_chars: int,
-    ) -> list[str]:
-        """
-        Split large documents while attempting to preserve sentence
-        and paragraph boundaries.
-        """
+    def _chunk_text(self, text: str, max_chars: int) -> list[str]:
+        """Split large documents while attempting to preserve sentence/paragraph boundaries."""
         if len(text) <= max_chars:
             return [text]
-
         chunks: list[str] = []
         start = 0
-
         while start < len(text):
-
             end = min(start + max_chars, len(text))
-
             paragraph_break = text.rfind("\n\n", start, end)
-
             if paragraph_break > start:
                 end = paragraph_break + 2
             else:
                 sentence_break = text.rfind(". ", start, end)
                 if sentence_break > start:
                     end = sentence_break + 2
-
             chunks.append(text[start:end])
             start = end
-
         return chunks
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Layer 2: spaCy NER (optional dependency: pii-shield[spacy])
+#  Layer 3: spaCy NER (optional dependency: pii-shield[spacy])
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SPACY_TO_ENTITY = {
@@ -346,11 +411,11 @@ _SPACY_TO_ENTITY = {
 
 class SpacyNERLayer:
     """
-    Layer 2: spaCy NER (on-premise). Detects PERSON, ORG, GPE/LOC/FAC.
+    Layer 3: spaCy NER (on-premise). Detects PERSON, ORG, GPE/LOC/FAC.
     Never sends data to any external service.
 
     Requires the ``pii-shield[spacy]`` extra (spaCy + a language model,
-    e.g. ``en_core_web_sm``).
+    e.g. ``en_core_web_sm``, must already be installed/downloaded).
     """
 
     def __init__(self, model_name: str = "en_core_web_sm") -> None:
@@ -366,19 +431,7 @@ class SpacyNERLayer:
         logger.info("spaCy model loaded.")
 
     def detect(self, text: str) -> list[DetectedSpan]:
-        """
-        Run the spaCy NER pipeline on the input text.
-
-        Parameters
-        ----------
-        text : str
-            Input document text.
-
-        Returns
-        -------
-        list[DetectedSpan]
-            Spans for PERSON, ORG, GPE/LOC/FAC entities.
-        """
+        """Run the spaCy NER pipeline on the input text."""
         doc = self._nlp(text)
         spans: list[DetectedSpan] = []
         for ent in doc.ents:
@@ -399,7 +452,7 @@ class SpacyNERLayer:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Layer 3: transformer-based privacy filter (optional dependency)
+#  Layer 4: transformer-based privacy filter (optional dependency)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _PRIVACY_FILTER_LABEL_TO_ENTITY = {
@@ -416,15 +469,10 @@ _PRIVACY_FILTER_LABEL_TO_ENTITY = {
 
 class PrivacyFilterLayer:
     """
-    Layer 3: transformer-based token-classification privacy filter, run
+    Layer 4: transformer-based token-classification privacy filter, run
     on-premise via a HuggingFace `transformers` pipeline.
 
     Requires the ``pii-shield[privacy-filter]`` extra (transformers + torch).
-
-    TokenizerSafeSpanMerger is applied as a defensive second pass: in rare
-    cases (very long entities split across a model's attention window, or
-    subword artefacts at chunk boundaries) the pipeline can emit adjacent
-    same-type spans that should be one entity.
     """
 
     def __init__(
@@ -434,21 +482,6 @@ class PrivacyFilterLayer:
         device: str = "cpu",
         max_chars_per_chunk: int = 4000,
     ) -> None:
-        """
-        Load a token-classification model via the HuggingFace pipeline.
-
-        Parameters
-        ----------
-        model_name : str
-            HuggingFace model identifier (e.g. an on-premise privacy/PII
-            token-classification model of your choosing).
-        threshold : float
-            Minimum pipeline `score` for an entity span to be accepted.
-        device : str
-            'cpu' or 'cuda' (or a CUDA device index understood by transformers).
-        max_chars_per_chunk : int
-            Defensive chunk size to bound peak memory on very large inputs.
-        """
         try:
             from transformers import pipeline as hf_pipeline
         except ImportError as exc:
@@ -475,19 +508,7 @@ class PrivacyFilterLayer:
         logger.info("Transformer privacy-filter model loaded.")
 
     def detect(self, text: str) -> list[DetectedSpan]:
-        """
-        Run the token-classification pipeline on the input text.
-
-        Parameters
-        ----------
-        text : str
-            Input document text. Chunked defensively for very large inputs.
-
-        Returns
-        -------
-        list[DetectedSpan]
-            Detected entity spans from the transformer model.
-        """
+        """Run the token-classification pipeline on the input text."""
         if not text.strip():
             return []
 
@@ -557,16 +578,6 @@ class TokenizerSafeSpanMerger:
         """
         Merge adjacent/overlapping spans of the same entity type that are
         contiguous in the text (no gap > 2 characters between them).
-
-        Parameters
-        ----------
-        spans : list[DetectedSpan]
-            Raw spans from a NER model, possibly with B/I/E artefacts.
-
-        Returns
-        -------
-        list[DetectedSpan]
-            Merged, deduplicated spans.
         """
         if not spans:
             return []
@@ -618,6 +629,9 @@ _FINANCIAL_ENTITIES = {
     EntityType.ROUTING_NUMBER,
     EntityType.CREDIT_CARD,
     EntityType.BANK_ACCOUNT,
+    EntityType.IFSC,
+    EntityType.UEN,
+    EntityType.CRN,
 }
 
 
@@ -626,31 +640,25 @@ class SpanConflictResolver:
     Resolves conflicts between DetectedSpan objects from different NER layers.
 
     Conflict resolution priority rules (applied in order):
-      1. Regex-validated spans always win over non-validated spans.
-      2. Higher confidence wins (when not regex-validated).
-      3. Longer span wins (when confidence is equal within 0.05).
-      4. Financial entity types override PHONE in overlapping spans.
+      0. If one span's range fully contains the other's, the containing
+         (longer) span always wins outright — this stops a short
+         sub-pattern from claiming a *fragment* of a longer, correctly-
+         matched span (see V-16: a 7-digit sub-pattern used to grab the
+         middle of a longer spaced phone number, leaving real digits
+         outside the match in cleartext next to a marker that looked
+         like the whole number had been handled).
+      1. Regex-validated spans win over non-validated spans.
+      2. Financial entity types override PHONE in overlapping spans.
+      3. Higher confidence wins (when not regex-validated / financial).
+      4. Longer span wins (when confidence is equal within 0.05).
       5. Duplicate entity (same start, end, entity_type) removed.
-      6. Remaining overlapping spans: keep the highest-priority span.
 
     After resolution, the output is a non-overlapping, deduplicated
     list of DetectedSpan objects, sorted by start offset.
     """
 
     def resolve(self, all_spans: list[DetectedSpan]) -> list[DetectedSpan]:
-        """
-        Merge spans from all NER layers into a single non-overlapping list.
-
-        Parameters
-        ----------
-        all_spans : list[DetectedSpan]
-            Combined spans from every enabled detection layer.
-
-        Returns
-        -------
-        list[DetectedSpan]
-            Non-overlapping, deduplicated, priority-resolved spans.
-        """
+        """Merge spans from all NER layers into a single non-overlapping list."""
         if not all_spans:
             return []
 
@@ -675,8 +683,6 @@ class SpanConflictResolver:
 
     def _priority(self, span: DetectedSpan) -> float:
         """
-        Compute a numeric priority for a span.
-
         Priority formula:
           base = confidence
           + 0.30 if regex_validated
@@ -692,16 +698,12 @@ class SpanConflictResolver:
         return score
 
     def _pick_winner(self, a: DetectedSpan, b: DetectedSpan) -> DetectedSpan:
-        """
-        Choose between two overlapping spans.
+        """Choose between two overlapping spans."""
+        if a.contains(b) and not b.contains(a):
+            return a
+        if b.contains(a) and not a.contains(b):
+            return b
 
-        Rules (in order):
-          1. Regex-validated beats non-validated.
-          2. Financial entity beats PHONE.
-          3. Higher confidence wins.
-          4. Longer span wins.
-          5. If still equal, keep the first (a).
-        """
         if a.is_regex_validated and not b.is_regex_validated:
             return a
         if b.is_regex_validated and not a.is_regex_validated:
@@ -734,7 +736,7 @@ class SpanConflictResolver:
 
 class NEREngine:
     """
-    Top-level NER engine composing regex, spaCy, and transformer
+    Top-level NER engine composing regex, GLiNER, spaCy, and transformer
     privacy-filter detection layers.
 
     Usage
@@ -747,13 +749,9 @@ class NEREngine:
         # with spaCy (requires pii-shield[spacy]):
         engine = NEREngine(enable_spacy=True)
 
-    Attributes
-    ----------
-    _regex_layer : RegexNERLayer
-    _spacy_layer : Optional[SpacyNERLayer]
-    _privacy_filter_layer : Optional[PrivacyFilterLayer]
-    _merger : TokenizerSafeSpanMerger
-    _resolver : SpanConflictResolver
+        # with GLiNER (requires pii-shield[gliner]; weights must be
+        # cached ahead of time — see pii_protect.ner.prefetch):
+        engine = NEREngine(enable_gliner=True)
     """
 
     def __init__(
@@ -763,6 +761,7 @@ class NEREngine:
         enable_gliner: bool = False,
         gliner_model: str = "gliner-community/gliner_small-v2.5",
         gliner_threshold: float = 0.60,
+        gliner_local_files_only: bool = True,
         enable_privacy_filter: bool = False,
         privacy_filter_model: Optional[str] = None,
         privacy_filter_threshold: float = 0.50,
@@ -778,6 +777,18 @@ class NEREngine:
             the ``pii-shield[spacy]`` extra.
         spacy_model : str
             spaCy model name (must be installed).
+        enable_gliner : bool
+            Enable the GLiNER zero-shot layer. Requires the
+            ``pii-shield[gliner]`` extra.
+        gliner_model : str
+            GLiNER model identifier.
+        gliner_threshold : float
+            Minimum GLiNER score for an entity span to be accepted.
+        gliner_local_files_only : bool
+            If True (default), GLiNER refuses to download weights at
+            construction time — it raises immediately if they aren't
+            already cached, instead of silently fetching them. Set to
+            False only if you deliberately want on-demand downloading.
         enable_privacy_filter : bool
             Enable the transformer token-classification layer. Requires
             the ``pii-shield[privacy-filter]`` extra.
@@ -793,11 +804,11 @@ class NEREngine:
         self._spacy_layer = SpacyNERLayer(spacy_model) if enable_spacy else None
 
         self._gliner_layer: Optional[GLiNERLayer] = None
-
         if enable_gliner:
             self._gliner_layer = GLiNERLayer(
                 model_name=gliner_model,
                 threshold=gliner_threshold,
+                local_files_only=gliner_local_files_only,
             )
 
         self._privacy_filter_layer: Optional[PrivacyFilterLayer] = None
@@ -832,16 +843,24 @@ class NEREngine:
         -------
         list[DetectedSpan]
             Non-overlapping PII entity spans, sorted by start offset.
+
+        Raises
+        ------
+        InvalidInputError
+            If ``text`` is not a string (e.g. None, an int, a list) —
+            raised here instead of letting an unrelated AttributeError
+            leak out of ``text.strip()`` (see V-7).
         """
+        if not isinstance(text, str):
+            raise InvalidInputError(
+                f"NEREngine.detect() expects a str, got {type(text).__name__}."
+            )
+
         if not text.strip():
             return []
 
         regex_spans = self._regex_layer.detect(text)
-        gliner_spans = (
-            self._gliner_layer.detect(text)
-            if self._gliner_layer
-            else []
-        )
+        gliner_spans = self._gliner_layer.detect(text) if self._gliner_layer else []
         spacy_spans = self._spacy_layer.detect(text) if self._spacy_layer else []
         privacy_filter_spans = (
             self._privacy_filter_layer.detect(text)

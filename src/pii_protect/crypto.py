@@ -1,5 +1,5 @@
 """
-pii_shield.crypto
+pii_protect.crypto
 ===================
 AES-256-GCM encryption helper used by PIIMaskingEngine to encrypt PII
 values before they are handed to a storage backend, and to decrypt them
@@ -30,9 +30,9 @@ from pii_protect.exceptions import DecryptionError
 
 logger = logging.getLogger(__name__)
 
-AES_KEY_LEN_BYTES = 32   # 256-bit key
-IV_LEN_BYTES      = 12   # 96-bit IV (GCM standard)
-TAG_LEN_BYTES     = 16   # 128-bit GCM auth tag
+AES_KEY_LEN_BYTES = 32  # 256-bit key
+IV_LEN_BYTES = 12  # 96-bit IV (GCM standard)
+TAG_LEN_BYTES = 16  # 128-bit GCM auth tag
 
 
 class Ciphertext(NamedTuple):
@@ -119,5 +119,7 @@ class AESGCMCipher:
         try:
             plaintext_bytes = self._aesgcm.decrypt(iv, ciphertext + tag, aad)
         except Exception as exc:
-            raise DecryptionError("AES-GCM decryption failed (bad key, tag, or tampered data).") from exc
+            raise DecryptionError(
+                "AES-GCM decryption failed (bad key, tag, or tampered data)."
+            ) from exc
         return plaintext_bytes.decode("utf-8")

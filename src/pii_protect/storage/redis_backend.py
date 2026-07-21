@@ -1,5 +1,5 @@
 """
-pii_shield.storage.redis_backend
+pii_protect.storage.redis_backend
 ===================================
 RedisStorage — a Redis-backed storage backend.
 
@@ -43,7 +43,7 @@ class RedisStorage(StorageBackend):
     url : str
         Redis connection URL, e.g. ``redis://localhost:6379/0``.
     key_prefix : str
-        Prefix applied to all Redis keys pii_shield creates, to avoid
+        Prefix applied to all Redis keys pii_protect creates, to avoid
         collisions with other data in the same Redis instance.
     ttl_seconds : Optional[int]
         Optional TTL applied to stored token records (None = no expiry).
@@ -52,7 +52,7 @@ class RedisStorage(StorageBackend):
     def __init__(
         self,
         url: str = "redis://localhost:6379/0",
-        key_prefix: str = "pii_shield:",
+        key_prefix: str = "pii_protect:",
         ttl_seconds: Optional[int] = None,
     ) -> None:
         self._url = url
@@ -64,7 +64,9 @@ class RedisStorage(StorageBackend):
         try:
             from redis import asyncio as redis_asyncio
         except ImportError as exc:
-            raise OptionalDependencyMissingError("RedisStorage", "redis", "redis") from exc
+            raise OptionalDependencyMissingError(
+                "RedisStorage", "redis", "redis"
+            ) from exc
 
         self._client = redis_asyncio.from_url(self._url, decode_responses=False)
         await self._client.ping()
@@ -98,9 +100,13 @@ class RedisStorage(StorageBackend):
         if self._ttl:
             await client.expire(token_key, self._ttl)
 
-        await client.set(self._hash_key(record.value_hash, record.scope), record.token_value)
+        await client.set(
+            self._hash_key(record.value_hash, record.scope), record.token_value
+        )
         if self._ttl:
-            await client.expire(self._hash_key(record.value_hash, record.scope), self._ttl)
+            await client.expire(
+                self._hash_key(record.value_hash, record.scope), self._ttl
+            )
 
     async def get(self, token_value: str) -> Optional[TokenRecord]:
         client = self._require_client()
@@ -124,7 +130,9 @@ class RedisStorage(StorageBackend):
                 records[token_value] = self._from_redis_hash(token_value, data)
         return records
 
-    async def find_by_value_hash(self, value_hash: str, scope: Optional[str]) -> Optional[str]:
+    async def find_by_value_hash(
+        self, value_hash: str, scope: Optional[str]
+    ) -> Optional[str]:
         client = self._require_client()
         result = await client.get(self._hash_key(value_hash, scope))
         return result.decode("utf-8") if isinstance(result, bytes) else result
@@ -132,6 +140,48 @@ class RedisStorage(StorageBackend):
     async def touch(self, token_value: str) -> None:
         client = self._require_client()
         await client.hincrby(self._token_key(token_value), "access_count", 1)
+
+    async def delete_by_scope(self, scope: Optional[str]) -> int:
+        client = self._require_client()
+        pattern = f"{self._prefix}hash:{scope or '_'}:*"
+        count = 0
+        async for hash_key in client.scan_iter(match=pattern):
+            token_value = await client.get(hash_key)
+            if token_value:
+                token_value = (
+                    token_value.decode("utf-8")
+                    if isinstance(token_value, bytes)
+                    else token_value
+                )
+                await client.delete(self._token_key(token_value))
+                count += 1
+            await client.delete(hash_key)
+        return count
+
+    async def all_records(self):
+        client = self._require_client()
+        pattern = f"{self._prefix}token:*"
+        prefix_len = len(f"{self._prefix}token:")
+        async for key in client.scan_iter(match=pattern):
+            data = await client.hgetall(key)
+            if not data:
+                continue
+            key_str = key.decode("utf-8") if isinstance(key, bytes) else key
+            token_value = key_str[prefix_len:]
+            yield self._from_redis_hash(token_value, data)
+
+    async def replace_ciphertext(
+        self, token_value: str, ciphertext: bytes, iv: bytes, tag: bytes
+    ) -> None:
+        client = self._require_client()
+        await client.hset(
+            self._token_key(token_value),
+            mapping={
+                "ciphertext": _b64e(ciphertext),
+                "iv": _b64e(iv),
+                "tag": _b64e(tag),
+            },
+        )
 
     # ── Internal ──────────────────────────────────────────────────────────
 
@@ -146,9 +196,15 @@ class RedisStorage(StorageBackend):
     def _hash_key(self, value_hash: str, scope: Optional[str]) -> str:
         return f"{self._prefix}hash:{scope or '_'}:{value_hash}"
 
-    def _from_redis_hash(self, token_value: str, data: dict[bytes, bytes]) -> TokenRecord:
+    def _from_redis_hash(
+        self, token_value: str, data: dict[bytes, bytes]
+    ) -> TokenRecord:
         def _s(key: str) -> str:
-            v = data[key.encode("utf-8")] if isinstance(next(iter(data)), bytes) else data[key]
+            v = (
+                data[key.encode("utf-8")]
+                if isinstance(next(iter(data)), bytes)
+                else data[key]
+            )
             return v.decode("utf-8") if isinstance(v, bytes) else v
 
         scope = _s("scope")

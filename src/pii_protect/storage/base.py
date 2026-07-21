@@ -1,5 +1,5 @@
 """
-pii_shield.storage.base
+pii_protect.storage.base
 =========================
 Abstract storage backend interface. Every backend (in-memory, filesystem,
 Redis, PostgreSQL, or a custom one you write) implements this contract,
@@ -16,14 +16,14 @@ Author: Musaib Altaf
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 from pii_protect.types import TokenRecord
 
 
 class StorageBackend(ABC):
     """
-    Abstract base class for all pii_shield vault storage backends.
+    Abstract base class for all pii_protect vault storage backends.
 
     Backends persist encrypted TokenRecords keyed by token_value, and
     support lookup-by-value-hash for within-scope deduplication.
@@ -70,7 +70,9 @@ class StorageBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def find_by_value_hash(self, value_hash: str, scope: Optional[str]) -> Optional[str]:
+    async def find_by_value_hash(
+        self, value_hash: str, scope: Optional[str]
+    ) -> Optional[str]:
         """
         Look up an existing token_value for a given value_hash within a
         scope (e.g. a document/invoice ID). Used to deduplicate repeated
@@ -82,6 +84,42 @@ class StorageBackend(ABC):
     @abstractmethod
     async def touch(self, token_value: str) -> None:
         """Increment the access count / update last-accessed metadata for a token."""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def delete_by_scope(self, scope: Optional[str]) -> int:
+        """
+        Delete every record associated with ``scope`` (pass ``None`` to
+        delete every record stored under the unscoped/global namespace).
+
+        Returns
+        -------
+        int
+            Number of records deleted.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def all_records(self) -> AsyncIterator[TokenRecord]:
+        """
+        Async-iterate every record currently in the backend. Used by
+        ``PIIMaskingEngine.rotate_encryption_key()`` to re-encrypt the
+        whole vault under a new key. Implementations should stream
+        rather than materialise everything in memory where the
+        underlying store supports it (e.g. a Postgres server-side cursor).
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def replace_ciphertext(
+        self, token_value: str, ciphertext: bytes, iv: bytes, tag: bytes
+    ) -> None:
+        """
+        Overwrite the ciphertext/IV/tag of an existing record in place,
+        without touching its scope, entity_type, value_hash, or access
+        count. Used exclusively by key rotation — plaintext never
+        changes, only which key encrypts it.
+        """
         raise NotImplementedError
 
     async def log_access(

@@ -1,5 +1,5 @@
 """
-pii_shield.ner
+pii_protect.ner
 ================
 Multi-layer NER detection engine (regex / spaCy / privacy-filter transformer).
 

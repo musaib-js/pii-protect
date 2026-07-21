@@ -1,5 +1,5 @@
 """
-pii_shield.storage.postgres
+pii_protect.storage.postgres
 ==============================
 PostgresStorage — a PostgreSQL-backed storage backend.
 
@@ -21,7 +21,7 @@ from pii_protect.exceptions import OptionalDependencyMissingError
 from pii_protect.storage.base import StorageBackend
 from pii_protect.types import TokenRecord
 
-_DEFAULT_SCHEMA = "pii_shield"
+_DEFAULT_SCHEMA = "pii_protect"
 
 _CREATE_SCHEMA_SQL = """
 CREATE SCHEMA IF NOT EXISTS {schema};
@@ -45,7 +45,7 @@ CREATE INDEX IF NOT EXISTS ix_{schema}_value_hash
 
 CREATE TABLE IF NOT EXISTS {schema}.access_log (
     id              bigserial PRIMARY KEY,
-    token_value     text NOT NULL REFERENCES {schema}.token_map(token_value),
+    token_value     text NOT NULL REFERENCES {schema}.token_map(token_value) ON DELETE CASCADE,
     operation       text NOT NULL,
     actor           text NOT NULL,
     scope           text,
@@ -64,8 +64,8 @@ class PostgresStorage(StorageBackend):
         asyncpg-compatible connection string,
         e.g. ``postgresql://user:pass@localhost:5432/mydb``.
     schema : str
-        Postgres schema to create/use for pii_shield tables. Defaults to
-        ``"pii_shield"`` to avoid colliding with application tables.
+        Postgres schema to create/use for pii_protect tables. Defaults to
+        ``"pii_protect"`` to avoid colliding with application tables.
     min_pool_size, max_pool_size : int
         Connection pool bounds passed to ``asyncpg.create_pool``.
     """
@@ -163,6 +163,38 @@ class PostgresStorage(StorageBackend):
                 WHERE token_value = $1
                 """,
                 token_value,
+            )
+
+    async def delete_by_scope(self, scope: Optional[str]) -> int:
+        pool = self._require_pool()
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                f"DELETE FROM {self._schema}.token_map WHERE scope IS NOT DISTINCT FROM $1",
+                scope,
+            )
+        # asyncpg execute() returns a status string like "DELETE 5"
+        try:
+            return int(result.split()[-1])
+        except (AttributeError, ValueError, IndexError):
+            return 0
+
+    async def all_records(self):
+        pool = self._require_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                async for row in conn.cursor(f"SELECT * FROM {self._schema}.token_map"):
+                    yield self._row_to_record(row)
+
+    async def replace_ciphertext(self, token_value: str, ciphertext: bytes, iv: bytes, tag: bytes) -> None:
+        pool = self._require_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                UPDATE {self._schema}.token_map
+                SET ciphertext = $2, encryption_iv = $3, encryption_tag = $4
+                WHERE token_value = $1
+                """,
+                token_value, ciphertext, iv, tag,
             )
 
     async def log_access(

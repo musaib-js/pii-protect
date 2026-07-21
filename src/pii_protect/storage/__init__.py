@@ -1,5 +1,5 @@
 """
-pii_shield.storage
+pii_protect.storage
 =====================
 Pluggable storage backends for the PII vault.
 

@@ -15,8 +15,6 @@ from pii_protect.ner import NEREngine
 from pii_protect.crypto import AESGCMCipher
 from pii_protect.storage import FileSystemStorage, InMemoryStorage
 
-
-
 SAMPLE_TEXT = "Contact john.doe@acme.com or +919812345678 about GST 27AAPFU0939F1ZV."
 FIXED_KEY = AESGCMCipher.generate_key()
 
@@ -78,6 +76,7 @@ async def test_mask_dict_and_unmask_dict():
 
         restored = await engine.unmask_dict(masked)
         assert restored == data
+
 
 
 @pytest.mark.asyncio

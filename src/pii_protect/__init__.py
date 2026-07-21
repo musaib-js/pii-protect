@@ -1,5 +1,5 @@
 """
-pii_shield
+pii_protect
 ============
 A pluggable, on-premise-first PII masking/unmasking/redaction library.
 
@@ -12,7 +12,7 @@ Public API
     MaskResult, UnmaskResult, DetectedEntityInfo — result types
     AESGCMCipher        — the encryption primitive used internally
 
-Storage backends live in ``pii_shield.storage``
+Storage backends live in ``pii_protect.storage``
 (``InMemoryStorage``, ``FileSystemStorage``, ``RedisStorage``, ``PostgresStorage``).
 
 Quick start
@@ -20,8 +20,8 @@ Quick start
 ::
 
     import asyncio
-    from pii_shield import PIIMaskingEngine
-    from pii_shield.storage import InMemoryStorage
+    from pii_protect import PIIMaskingEngine
+    from pii_protect.storage import InMemoryStorage
 
     async def main():
         async with PIIMaskingEngine(storage=InMemoryStorage()) as engine:
@@ -56,7 +56,7 @@ from pii_protect.types import (
     UnmaskResult,
 )
 
-__version__ = "0.1.8"
+__version__ = "0.1.9"
 
 __all__ = [
     "PIIMaskingEngine",

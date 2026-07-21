@@ -1,5 +1,5 @@
 """
-pii_shield.storage.memory
+pii_protect.storage.memory
 ============================
 InMemoryStorage — a plain-dict storage backend.
 
@@ -44,7 +44,9 @@ class InMemoryStorage(StorageBackend):
     async def get_many(self, token_values: list[str]) -> dict[str, TokenRecord]:
         return {t: self._tokens[t] for t in token_values if t in self._tokens}
 
-    async def find_by_value_hash(self, value_hash: str, scope: Optional[str]) -> Optional[str]:
+    async def find_by_value_hash(
+        self, value_hash: str, scope: Optional[str]
+    ) -> Optional[str]:
         return self._hash_index.get((value_hash, scope))
 
     async def touch(self, token_value: str) -> None:
@@ -52,6 +54,30 @@ class InMemoryStorage(StorageBackend):
             record = self._tokens.get(token_value)
             if record is not None:
                 record.access_count += 1
+
+    async def delete_by_scope(self, scope: Optional[str]) -> int:
+        async with self._lock:
+            matching = [t for t, r in self._tokens.items() if r.scope == scope]
+            for token_value in matching:
+                del self._tokens[token_value]
+            matching_keys = [k for k in self._hash_index if k[1] == scope]
+            for key in matching_keys:
+                del self._hash_index[key]
+            return len(matching)
+
+    async def all_records(self):
+        for record in list(self._tokens.values()):
+            yield record
+
+    async def replace_ciphertext(
+        self, token_value: str, ciphertext: bytes, iv: bytes, tag: bytes
+    ) -> None:
+        async with self._lock:
+            record = self._tokens.get(token_value)
+            if record is not None:
+                record.ciphertext = ciphertext
+                record.iv = iv
+                record.tag = tag
 
     def __len__(self) -> int:
         return len(self._tokens)
