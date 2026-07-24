@@ -28,7 +28,7 @@ Design
     overwrite/leak a value on the vanishingly unlikely chance of a
     collision).
   - The salt MUST be supplied explicitly (constructor arg or the
-    pii_protect_SALT env var) — there is no hardcoded fallback. A shared
+    PII_PROTECT_SALT env var) — there is no hardcoded fallback. A shared
     default salt would make tokens predictable/guessable across every
     default install; failing closed here is intentional. Use
     ``DeterministicTokenGenerator.generate_salt()`` to create one.
@@ -61,7 +61,7 @@ _SUFFIX_LEN_HEX = _SUFFIX_LEN_BYTES * 2
 # Token regex for parsing masked text (used by PIIMaskingEngine.unmask)
 TOKEN_PATTERN = re.compile(r"\{\{([A-Z_]+):([0-9a-f]{32})\}\}")
 
-_SALT_ENV_VAR = "pii_protect_SALT"
+_SALT_ENV_VAR = "PII_PROTECT_SALT"
 
 
 def _normalise(plaintext: str) -> str:
@@ -82,7 +82,7 @@ class DeterministicTokenGenerator:
     ----------
     _salt : str
         Per-instance secret salt. Required — either passed explicitly or
-        read from the ``pii_protect_SALT`` env var. There is no insecure
+        read from the ``PII_PROTECT_SALT`` env var. There is no insecure
         default; construction raises if neither is provided.
     """
 

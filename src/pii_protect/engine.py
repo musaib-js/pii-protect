@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from copy import deepcopy
 from typing import Any, Optional, Union
 
@@ -61,8 +60,6 @@ from pii_protect.types import (
 
 logger = logging.getLogger(__name__)
 
-_NUMBER_RE = re.compile(r"-?\d+(\.\d+)?")
-
 
 class PIIMaskingEngine:
     """
@@ -85,7 +82,7 @@ class PIIMaskingEngine:
     token_generator : Optional[DeterministicTokenGenerator]
         Custom token generator (e.g. with a specific salt). Defaults to a
         new DeterministicTokenGenerator() if omitted — which itself
-        requires an explicit salt or the pii_protect_SALT env var to be set.
+        requires an explicit salt or the PII_PROTECT_SALT env var to be set.
     actor : str
         Default identity recorded on storage backends that support audit
         logging (e.g. PostgresStorage.log_access). Overridable per call.
@@ -686,19 +683,21 @@ class PIIMaskingEngine:
         if isinstance(obj, list):
             return [await self._unmask_walk(item, scope, actor) for item in obj]
         if isinstance(obj, str):
-            unmasked = await self.unmask(obj, scope=scope, actor=actor)
-            return self._maybe_coerce_number(unmasked) if unmasked != obj else obj
+            # Deliberately no int/float coercion here (see V-19): a string
+            # leaf must always come back as a string, even if it happens to
+            # look like a bare number after unmasking (e.g. a phone number
+            # stored as its own string value, "9876543210"). There is no
+            # reliable way to tell, from the masked structure alone, whether
+            # such a leaf started life as a str or a number -- mask_dict()
+            # only converts a numeric leaf to a string in the first place
+            # when it had to (PII was found in it), and that string-ified
+            # form is indistinguishable from a leaf that was always a
+            # string. Guessing wrong in either direction is a type
+            # corruption; always preserving "it's a string" is the one
+            # choice that never silently changes a value that was a string
+            # to begin with.
+            return await self.unmask(obj, scope=scope, actor=actor)
         return obj
-
-    @staticmethod
-    def _maybe_coerce_number(s: str) -> Any:
-        """Best-effort: restore a leaf to int/float if unmasking fully resolved it back to a bare number."""
-        if _NUMBER_RE.fullmatch(s):
-            try:
-                return int(s) if "." not in s else float(s)
-            except ValueError:
-                pass
-        return s
 
     def _assert_initialised(self) -> None:
         if not self._initialised:

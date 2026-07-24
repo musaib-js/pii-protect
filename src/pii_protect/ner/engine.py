@@ -9,14 +9,14 @@ Detection layers (applied in order, results merged):
      no extra dependencies.
   2. GLiNER               — zero-shot on-premise NER (person/org/address/
      passport/driving-license/username/etc.). Requires the
-     ``pii-shield[gliner]`` extra.
+     ``pii-protect[gliner]`` extra.
   3. spaCy NER            — lightweight on-premise model (e.g. en_core_web_sm)
-     for PERSON, ORG, GPE entity detection. Requires the ``pii-shield[spacy]``
+     for PERSON, ORG, GPE entity detection. Requires the ``pii-protect[spacy]``
      extra.
   4. Transformer privacy filter — bidirectional token-classification model
      run on-premise via a HuggingFace `transformers.pipeline`
      (task="token-classification", aggregation_strategy="simple"). Requires
-     the ``pii-shield[privacy-filter]`` extra.
+     the ``pii-protect[privacy-filter]`` extra.
 
 After detection, the SpanConflictResolver resolves conflicts across all
 enabled layers and produces a deduplicated, non-overlapping span list.
@@ -73,6 +73,12 @@ _UPI_HANDLES = (
     "idfcfirst|federal|cnrb|barodampay|pockets|airtel"
 )
 
+# How close a "SWIFT"/"BIC" label must appear before a candidate code for it
+# to be accepted (V-13) -- covers "SWIFT: DEUTDEFF", "BIC DEUTDEFF", "Bank
+# SWIFT code: DEUTDEFF", etc. without requiring an exact adjacency.
+_SWIFT_CONTEXT_WINDOW = 25
+_SWIFT_CONTEXT_RE = re.compile(r"\b(?:swift|bic)\b", re.IGNORECASE)
+
 
 def _luhn_is_valid(digits: str) -> bool:
     """
@@ -128,15 +134,26 @@ class RegexPatternLibrary:
     CREDIT_CARD = re.compile(r"\b(?:\d[ -]?){13,19}\b")
 
     # Contact
-    EMAIL = re.compile(r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b")
+    # Allows a small amount of whitespace around '@' -- "john @ acme.com" is a
+    # realistic OCR/manual-entry artefact, not a different kind of value; the
+    # unmasked entity_type is still EMAIL either way (V-8 residual).
+    EMAIL = re.compile(
+        r"\b[a-zA-Z0-9._%+\-]+\s{0,2}@\s{0,2}[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b"
+    )
     UPI = re.compile(rf"\b[\w.\-]{{2,64}}@(?:{_UPI_HANDLES})\b", re.IGNORECASE)
-    PHONE_IN = re.compile(r"\b(?:\+91|0)?[6-9]\d{9}\b")  # India mobile
+    PHONE_IN = re.compile(r"\b(?:\+91|0)?[6-9]\d{9}\b")  # India mobile, contiguous
+    PHONE_IN_SPACED = re.compile(
+        r"\b(?:\+91[-\s]?)?[6-9]\d{4}[-\s]\d{5}\b"
+    )  # India mobile, "98765 43210" (V-16)
     PHONE_INTL = re.compile(
         r"\+\d{1,3}[\s\-]?\(?\d{1,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{3,4}"
     )
     PHONE_US = re.compile(
         r"(?:\+1-?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b"
     )  # requires a separator between all 3 groups
+    PHONE_PARENS = re.compile(
+        r"\(\d{3,6}\)\s?\d{3,8}\b"
+    )  # "(98765)43210" (V-8 residual)
 
     # Invoice / document references
     INVOICE_REF = re.compile(
@@ -183,8 +200,10 @@ class RegexPatternLibrary:
             (cls.EMAIL, EntityType.EMAIL, 0.99),
             (cls.UPI, EntityType.UPI, 0.85),
             (cls.PHONE_IN, EntityType.PHONE, 0.95),
+            (cls.PHONE_IN_SPACED, EntityType.PHONE, 0.85),
             (cls.PHONE_INTL, EntityType.PHONE, 0.90),
             (cls.PHONE_US, EntityType.PHONE, 0.85),
+            (cls.PHONE_PARENS, EntityType.PHONE, 0.80),
             (cls.INVOICE_REF, EntityType.INVOICE_NUMBER, 0.80),
             (cls.PO_REF, EntityType.PO_NUMBER, 0.80),
             (cls.URL, EntityType.URL, 0.85),
@@ -204,9 +223,17 @@ class RegexNERLayer:
     because a shape match alone is too permissive:
       - CREDIT_CARD candidates must pass a Luhn checksum (V-12): a
         sequential or all-zero 13-19 digit run is not a real card number.
-      - SWIFT/BIC candidates must have a valid ISO 3166-1 country code in
-        positions 5-6 (V-13): otherwise ordinary 8-letter capitalised
-        English words (CHECKING, SHIPMENT, ...) match the shape too.
+      - SWIFT/BIC candidates must (a) have a valid ISO 3166-1 country
+        code in positions 5-6, AND (b) appear within a short window of
+        a "SWIFT"/"BIC" label in the surrounding text (V-13). The
+        country-code check alone isn't enough: with 249 valid codes out
+        of 676 possible two-letter combinations, roughly a third of
+        random 8-letter ALL-CAPS words coincidentally land on a real
+        code (CHECKING -> "KI", SHIPMENT -> "ME", DEADLINE -> "LI" all
+        pass the country-code check on their own). Requiring a nearby
+        label is how real-world SWIFT extraction narrows this down in
+        practice, and matches how these codes actually appear in
+        business documents ("SWIFT: DEUTDEFF", "BIC DEUTDEFF").
 
     Note on PHONE patterns deliberately NOT included here: an earlier
     bare-7-digit pattern (`\\d{3}[-.\\s]?\\d{4}`) was removed. It both
@@ -249,6 +276,10 @@ class RegexNERLayer:
                 if entity_type == EntityType.SWIFT:
                     if len(value) not in (8, 11) or value[4:6] not in _ISO_3166_ALPHA2:
                         continue
+                    window_start = max(0, match.start() - _SWIFT_CONTEXT_WINDOW)
+                    context = text[window_start : match.start()]
+                    if not _SWIFT_CONTEXT_RE.search(context):
+                        continue
 
                 spans.append(
                     DetectedSpan(
@@ -265,7 +296,7 @@ class RegexNERLayer:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Layer 2: GLiNER (optional dependency: pii-shield[gliner])
+#  Layer 2: GLiNER (optional dependency: pii-protect[gliner])
 # ─────────────────────────────────────────────────────────────────────────────
 
 _GLINER_TO_ENTITY = {
@@ -291,7 +322,7 @@ class GLiNERLayer:
     """
     Layer 2: GLiNER zero-shot Named Entity Recognition, run fully on-premise.
 
-    Requires the ``pii-shield[gliner]`` extra.
+    Requires the ``pii-protect[gliner]`` extra.
 
     Model loading defaults to OFFLINE (``local_files_only=True``): if the
     model weights aren't already cached locally, construction raises
@@ -323,7 +354,7 @@ class GLiNERLayer:
     def __init__(
         self,
         model_name: str = "gliner-community/gliner_small-v2.5",
-        threshold: float = 0.55,
+        threshold: float = 0.60,
         labels: Optional[tuple[str, ...]] = None,
         max_chars_per_chunk: int = 4000,
         local_files_only: bool = True,
@@ -397,7 +428,7 @@ class GLiNERLayer:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Layer 3: spaCy NER (optional dependency: pii-shield[spacy])
+#  Layer 3: spaCy NER (optional dependency: pii-protect[spacy])
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SPACY_TO_ENTITY = {
@@ -414,7 +445,7 @@ class SpacyNERLayer:
     Layer 3: spaCy NER (on-premise). Detects PERSON, ORG, GPE/LOC/FAC.
     Never sends data to any external service.
 
-    Requires the ``pii-shield[spacy]`` extra (spaCy + a language model,
+    Requires the ``pii-protect[spacy]`` extra (spaCy + a language model,
     e.g. ``en_core_web_sm``, must already be installed/downloaded).
     """
 
@@ -472,7 +503,7 @@ class PrivacyFilterLayer:
     Layer 4: transformer-based token-classification privacy filter, run
     on-premise via a HuggingFace `transformers` pipeline.
 
-    Requires the ``pii-shield[privacy-filter]`` extra (transformers + torch).
+    Requires the ``pii-protect[privacy-filter]`` extra (transformers + torch).
     """
 
     def __init__(
@@ -746,10 +777,10 @@ class NEREngine:
         engine = NEREngine()   # regex only, no extra dependencies
         spans = engine.detect("Invoice from Acme Corp, GST: 27AAPFU0939F1ZV")
 
-        # with spaCy (requires pii-shield[spacy]):
+        # with spaCy (requires pii-protect[spacy]):
         engine = NEREngine(enable_spacy=True)
 
-        # with GLiNER (requires pii-shield[gliner]; weights must be
+        # with GLiNER (requires pii-protect[gliner]; weights must be
         # cached ahead of time — see pii_protect.ner.prefetch):
         engine = NEREngine(enable_gliner=True)
     """
@@ -774,12 +805,12 @@ class NEREngine:
         ----------
         enable_spacy : bool
             Enable the spaCy layer (PERSON/ORG/GPE detection). Requires
-            the ``pii-shield[spacy]`` extra.
+            the ``pii-protect[spacy]`` extra.
         spacy_model : str
             spaCy model name (must be installed).
         enable_gliner : bool
             Enable the GLiNER zero-shot layer. Requires the
-            ``pii-shield[gliner]`` extra.
+            ``pii-protect[gliner]`` extra.
         gliner_model : str
             GLiNER model identifier.
         gliner_threshold : float
@@ -791,7 +822,7 @@ class NEREngine:
             False only if you deliberately want on-demand downloading.
         enable_privacy_filter : bool
             Enable the transformer token-classification layer. Requires
-            the ``pii-shield[privacy-filter]`` extra.
+            the ``pii-protect[privacy-filter]`` extra.
         privacy_filter_model : Optional[str]
             HuggingFace model identifier. Required if
             ``enable_privacy_filter=True``.
