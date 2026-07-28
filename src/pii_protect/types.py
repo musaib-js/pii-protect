@@ -23,6 +23,7 @@ class EntityType(str, Enum):
 
     PERSON = "PERSON"
     ORGANISATION = "ORGANISATION"
+    AADHAR = "AADHAR"
     ADDRESS = "ADDRESS"
     EMAIL = "EMAIL"
     PHONE = "PHONE"

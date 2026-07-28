@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.1
+
+### Enhanced
+
+- **Aadhar numbers are now detected.** The regex layer has been enhanced to detect aadhar numbers and
+  also validate them using verhoeff algorithm to make sure every 12 digit number that looks like an
+  Aadhar number is not tagged as an Aadhar number.
+
+
+### Fixed
+
+- **PO and Invoice Reference Removed as PII Types** PO Number and Invoice Number, which don't essentially qualify
+  to be PII items have been removed.
+
+- **False positive for names in GLiNER fixed.** Words like Hi, Ha whenever given individually to the model were tagged
+  as person, which is a classical issue with zero-shot NER detection. It has been fixed with a post NER validator
+  based on the length of the word.
+
+
+- No changes to how encryption, scopes, or tokens work — this release is
+  entirely about detection accuracy for Aadhar cards and the false positive resolutions
+
+
+
 ## 0.2.0
 
 ### Renamed

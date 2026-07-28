@@ -511,3 +511,55 @@ async def test_gliner_masks_business_correspondence():
         restored = await engine.unmask(result.masked_text)
 
         assert restored == text
+        
+@pytest.mark.asyncio
+async def test_aadhar_numbers():
+    text = """
+    Hi, my aadhar number is [Add your aadhar] and [Add your aadhar with spaces]
+    """
+
+    ner = NEREngine(enable_gliner=True)
+
+    async with PIIMaskingEngine(
+        storage=InMemoryStorage(),
+        encryption_key=FIXED_KEY,
+        ner_engine=ner,
+        token_generator=token_generator
+    ) as engine:
+
+        result = await engine.mask(text)
+
+        assert "{{AADHAR:" in result.masked_text
+        assert "" not in result.masked_text
+        assert "" not in result.masked_text
+        
+
+        restored = await engine.unmask(result.masked_text)
+        
+        assert "889412412624" in restored
+        assert "8894 1241 2624" in restored
+                
+
+        assert restored == text
+
+
+@pytest.mark.asyncio
+async def test_hi_not_masked():
+    text = """
+    Hi
+    """
+
+    ner = NEREngine(enable_gliner=True)
+
+    async with PIIMaskingEngine(
+        storage=InMemoryStorage(),
+        encryption_key=FIXED_KEY,
+        ner_engine=ner,
+        token_generator=token_generator
+    ) as engine:
+
+        result = await engine.mask(text)
+
+        assert "{{PERSON:" not in result.masked_text
+        assert "Hi" in result.masked_text
+    

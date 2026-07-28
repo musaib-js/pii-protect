@@ -39,6 +39,7 @@ from typing import Optional
 
 from pii_protect.exceptions import InvalidInputError, OptionalDependencyMissingError
 from pii_protect.types import DetectedSpan, EntityType
+from pii_protect.ner.validators import _is_valid_gliner_entity, _luhn_is_valid, _verhoeff_is_valid
 
 logger = logging.getLogger(__name__)
 
@@ -80,26 +81,6 @@ _SWIFT_CONTEXT_WINDOW = 25
 _SWIFT_CONTEXT_RE = re.compile(r"\b(?:swift|bic)\b", re.IGNORECASE)
 
 
-def _luhn_is_valid(digits: str) -> bool:
-    """
-    Validate a digit string against the Luhn checksum (used to filter the
-    CREDIT_CARD pattern — see V-12). Returns False for anything that isn't
-    a plausible card number, including sequences that merely look like one.
-    """
-    if not digits.isdigit() or not (13 <= len(digits) <= 19):
-        return False
-    total = 0
-    parity = len(digits) % 2
-    for i, ch in enumerate(digits):
-        d = int(ch)
-        if i % 2 == parity:
-            d *= 2
-            if d > 9:
-                d -= 9
-        total += d
-    return total % 10 == 0
-
-
 class RegexPatternLibrary:
     """
     High-precision regex patterns for structured PII entities.
@@ -113,6 +94,7 @@ class RegexPatternLibrary:
     PAN_NUMBER = re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]{1}\b")
     TAN_NUMBER = re.compile(r"\b[A-Z]{4}[0-9]{5}[A-Z]{1}\b")
     IFSC = re.compile(r"\b[A-Z]{4}0[A-Z0-9]{6}\b")
+    AADHAR_NUMBER = re.compile(r"\b[2-9]\d{3}(?:\s?\d{4}){2}\b")
 
     # International tax / company registration
     ABN_NUMBER = re.compile(
@@ -155,16 +137,6 @@ class RegexPatternLibrary:
         r"\(\d{3,6}\)\s?\d{3,8}\b"
     )  # "(98765)43210" (V-8 residual)
 
-    # Invoice / document references
-    INVOICE_REF = re.compile(
-        r"\b(?:Invoice|Inv)\.?\s*(?:No\.?|Number|#|:)?\s*:?\s*[A-Z0-9\-/]{4,20}\b",
-        re.IGNORECASE,
-    )
-    PO_REF = re.compile(
-        r"\b(?:PO|Purchase\s*Order)\.?\s*(?:No\.?|Number|#|:)?\s*:?\s*[A-Z0-9\-/]{4,20}\b",
-        re.IGNORECASE,
-    )
-
     # URL
     URL = re.compile(r"\bhttps?://[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
     URL_NO_PROTOCOL = re.compile(r"\b(?:www\.)[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
@@ -178,6 +150,7 @@ class RegexPatternLibrary:
             (cls.GST_NUMBER, EntityType.GST, 0.99),
             (cls.PAN_NUMBER, EntityType.PAN, 0.97),
             (cls.TAN_NUMBER, EntityType.TAN, 0.92),
+            (cls.AADHAR_NUMBER, EntityType.AADHAR, 0.99),
             (cls.IFSC, EntityType.IFSC, 0.90),
             (cls.ABN_NUMBER, EntityType.ABN, 0.96),
             (cls.UEN_NUMBER, EntityType.UEN, 0.90),
@@ -204,8 +177,6 @@ class RegexPatternLibrary:
             (cls.PHONE_INTL, EntityType.PHONE, 0.90),
             (cls.PHONE_US, EntityType.PHONE, 0.85),
             (cls.PHONE_PARENS, EntityType.PHONE, 0.80),
-            (cls.INVOICE_REF, EntityType.INVOICE_NUMBER, 0.80),
-            (cls.PO_REF, EntityType.PO_NUMBER, 0.80),
             (cls.URL, EntityType.URL, 0.85),
             (cls.URL_NO_PROTOCOL, EntityType.URL, 0.80),
             (cls.URL_FTP, EntityType.URL, 0.80),
@@ -271,6 +242,10 @@ class RegexNERLayer:
                 if entity_type == EntityType.CREDIT_CARD:
                     stripped = re.sub(r"[ \-]", "", value)
                     if not _luhn_is_valid(stripped):
+                        continue
+                    
+                if entity_type == EntityType.AADHAR:
+                    if not _verhoeff_is_valid(value):
                         continue
 
                 if entity_type == EntityType.SWIFT:
@@ -391,6 +366,15 @@ class GLiNERLayer:
                 chunk, labels=self._labels, threshold=self._threshold
             )
             for entity in entities:
+                label = entity["label"].lower()
+                score = float(entity["score"])
+                value = entity["text"]
+                if not _is_valid_gliner_entity(
+                        text=value,
+                        label=label,
+                        score=score,
+                    ):
+                        continue
                 entity_type = _GLINER_TO_ENTITY.get(
                     entity["label"].lower(), EntityType.OTHER
                 )
