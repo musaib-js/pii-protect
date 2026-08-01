@@ -251,10 +251,6 @@ class RegexNERLayer:
                 if entity_type == EntityType.SWIFT:
                     if len(value) not in (8, 11) or value[4:6] not in _ISO_3166_ALPHA2:
                         continue
-                    window_start = max(0, match.start() - _SWIFT_CONTEXT_WINDOW)
-                    context = text[window_start : match.start()]
-                    if not _SWIFT_CONTEXT_RE.search(context):
-                        continue
 
                 spans.append(
                     DetectedSpan(
@@ -329,7 +325,7 @@ class GLiNERLayer:
     def __init__(
         self,
         model_name: str = "gliner-community/gliner_small-v2.5",
-        threshold: float = 0.60,
+        threshold: float = 0.50,
         labels: Optional[tuple[str, ...]] = None,
         max_chars_per_chunk: int = 4000,
         local_files_only: bool = True,

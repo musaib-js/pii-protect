@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.2
+
+### Fixed
+
+- **SWIFT code Detection.** The regex layer has been enhanced to detect SWIFT Codes efficiently by removing the 
+  need of contextual information present in the adjacent text.
+- **Person name detection.** The GLiNER layer threshold has been reduced to 0.5 to detect the Indian origin names that 
+  were missed by 0.6 threshold
+
+
 ## 0.2.1
 
 ### Enhanced
