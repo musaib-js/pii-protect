@@ -562,4 +562,24 @@ async def test_hi_not_masked():
 
         assert "{{PERSON:" not in result.masked_text
         assert "Hi" in result.masked_text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text",
+    [
+        "or phone at **+632 8811 8866** and",
+        "or phone at **+632  8811 8866** and",  # double space between groups
+        "or phone at **+632 8811  8866** and",  # double space, other gap
+        "or phone at **+63 2 8811 8866** and",  # spaced-out country/area code
+    ],
+)
+async def test_intl_phone_number_with_irregular_spacing_is_masked(text):
+    async with PIIMaskingEngine(
+        storage=InMemoryStorage(), encryption_key=FIXED_KEY, token_generator=token_generator
+    ) as engine:
+        result = await engine.mask(text)
+        assert "8811" not in result.masked_text
+        assert "8866" not in result.masked_text
+        assert "{{PHONE:" in result.masked_text
     

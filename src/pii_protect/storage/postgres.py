@@ -15,13 +15,15 @@ Author: Musaib Altaf
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 
 from pii_protect.exceptions import OptionalDependencyMissingError
 from pii_protect.storage.base import StorageBackend
 from pii_protect.types import TokenRecord
 
-_DEFAULT_SCHEMA = "pii_protect"
+_SCHEMA_ENV_VAR = "PII_SCHEMA"
+_DEFAULT_SCHEMA = "public"
 
 _CREATE_SCHEMA_SQL = """
 CREATE SCHEMA IF NOT EXISTS {schema};
@@ -63,9 +65,10 @@ class PostgresStorage(StorageBackend):
     dsn : str
         asyncpg-compatible connection string,
         e.g. ``postgresql://user:pass@localhost:5432/mydb``.
-    schema : str
-        Postgres schema to create/use for pii_protect tables. Defaults to
-        ``"pii_protect"`` to avoid colliding with application tables.
+    schema : Optional[str]
+        Postgres schema to create/use for pii_protect tables. If omitted,
+        falls back to the ``PII_SCHEMA`` env var, and then to
+        ``"public"`` if that isn't set either.
     min_pool_size, max_pool_size : int
         Connection pool bounds passed to ``asyncpg.create_pool``.
     """
@@ -73,12 +76,12 @@ class PostgresStorage(StorageBackend):
     def __init__(
         self,
         dsn: str,
-        schema: str = _DEFAULT_SCHEMA,
+        schema: Optional[str] = None,
         min_pool_size: int = 1,
         max_pool_size: int = 10,
     ) -> None:
         self._dsn = dsn
-        self._schema = schema
+        self._schema = schema or os.environ.get(_SCHEMA_ENV_VAR) or _DEFAULT_SCHEMA
         self._min_pool_size = min_pool_size
         self._max_pool_size = max_pool_size
         self._pool: Any = None

@@ -1,11 +1,27 @@
 # Changelog
 
+## 0.2.3
+
+### Added
+
+- **`PostgresStorage` schema is now configurable via the `PII_SCHEMA` env
+  var.** Resolution order is: explicit `schema=` constructor arg, then
+  the `PII_SCHEMA` environment variable, then `"public"` if neither is
+  set.
+
+### Fixed
+
+- **International phone numbers with irregular spacing are now detected.**
+  A number like `+632 8811 8866` with more than one space between digit
+  groups (e.g. `+632  8811 8866`) previously wasn't matched by the
+  international phone pattern and leaked through in cleartext. The
+  pattern now tolerates multiple spaces/hyphens between groups.
+
 ## 0.2.2
 
 ### Fixed
 
-- **SWIFT code Detection.** The regex layer has been enhanced to detect SWIFT Codes efficiently by removing the 
-  need of contextual information present in the adjacent text.
+- **SWIFT code Detection.** The post-regex validation layer has been enhanced to detect SWIFT Codes efficiently by removing the  need of contextual information present in the adjacent text.
 - **Person name detection.** The GLiNER layer threshold has been reduced to 0.5 to detect the Indian origin names that 
   were missed by 0.6 threshold
 

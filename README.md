@@ -563,6 +563,9 @@ InMemoryStorage()
 FileSystemStorage("./vault.json")
 RedisStorage("redis://localhost:6379/0")
 PostgresStorage("postgresql://user:pass@host:5432/mydb")   # creates its own schema on connect()
+
+# Schema resolution: explicit `schema=` arg > PII_SCHEMA env var > "public"
+PostgresStorage("postgresql://user:pass@host:5432/mydb", schema="my_schema")
 ```
 
 Custom backend:

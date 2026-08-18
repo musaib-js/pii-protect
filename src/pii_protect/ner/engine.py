@@ -128,8 +128,8 @@ class RegexPatternLibrary:
         r"\b(?:\+91[-\s]?)?[6-9]\d{4}[-\s]\d{5}\b"
     )  # India mobile, "98765 43210" (V-16)
     PHONE_INTL = re.compile(
-        r"\+\d{1,3}[\s\-]?\(?\d{1,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{3,4}"
-    )
+        r"\+\d{1,3}[\s\-]{0,3}\(?\d{1,4}\)?[\s\-]{0,3}\d{3,4}[\s\-]{0,3}\d{3,4}"
+    )  # tolerates more than one space/hyphen between groups, e.g. "+632  8811  8866"
     PHONE_US = re.compile(
         r"(?:\+1-?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b"
     )  # requires a separator between all 3 groups
