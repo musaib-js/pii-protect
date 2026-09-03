@@ -286,6 +286,7 @@ _GLINER_TO_ENTITY = {
     "customer name": EntityType.PERSON,
     "vendor name": EntityType.ORGANISATION,
     "ifsc code": EntityType.IFSC,
+    "job title": EntityType.JOB_TITLE,
 }
 
 
@@ -305,6 +306,7 @@ class GLiNERLayer:
     """
 
     DEFAULT_LABELS = (
+        "job title",
         "person",
         "organization",
         "company",
@@ -374,6 +376,8 @@ class GLiNERLayer:
                 entity_type = _GLINER_TO_ENTITY.get(
                     entity["label"].lower(), EntityType.OTHER
                 )
+                if entity_type is EntityType.JOB_TITLE:
+                    continue
                 spans.append(
                     DetectedSpan(
                         start=offset + entity["start"],

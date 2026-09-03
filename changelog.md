@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.4
+
+### Fixed
+
+- ** False positives for job titles in GLiNER person detection. Job titles such as CEO, CFO, CTO, branch manager, and account manager could previously be incorrectly classified as person names by the GLiNER layer. The GLiNER label set now includes job title as a competing entity type, allowing the model to distinguish job roles from actual person names. Job-title detections are subsequently ignored and are not returned as PII entities.
+
 ## 0.2.3
 
 ### Added

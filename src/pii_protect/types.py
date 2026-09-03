@@ -53,6 +53,7 @@ class EntityType(str, Enum):
     DRIVING_LICENSE = "DRIVING_LICENSE"
     USERNAME = "USERNAME"
     CUSTOM = "CUSTOM"  # caller-declared PII (mask_dict_with_known_pii_keys) — not NER-detected
+    JOB_TITLE = "JOB_TITLE"  # not NER-detected, but can be used for partial masking
     OTHER = "OTHER"
 
 
