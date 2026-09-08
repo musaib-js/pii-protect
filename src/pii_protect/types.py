@@ -56,6 +56,7 @@ class EntityType(str, Enum):
     PH_GOVT_ID = "PH_GOVT_ID"  # Philippines govt-issued ID (SSS/GSIS/PhilHealth/Pag-IBIG/UMID/PhilSys)
     STUDENT_ID = "STUDENT_ID"
     MEDICAL_RECORD_NUMBER = "MEDICAL_RECORD_NUMBER"
+    VEHICLE_NUMBER = "VEHICLE_NUMBER"  # license plate (India/Philippines/US/UAE/Saudi Arabia)
     PIN = "PIN"
     OTP = "OTP"
     CUSTOM = "CUSTOM"  # caller-declared PII (mask_dict_with_known_pii_keys) — not NER-detected

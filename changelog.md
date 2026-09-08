@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.6
+
+### Added
+
+- **Vehicle/license plate number detection.** The regex layer now
+  recognises license plates for India, the Philippines, the US, the
+  UAE, and Saudi Arabia as a new `VEHICLE_NUMBER` entity type. A match
+  requires a nearby "plate"/"vehicle no"/"registration no" label, since
+  a plate's letters+digits shape alone is indistinguishable from an
+  invoice code, coupon code, or tracking number.
+
+### Fixed
+
+- **Indian plate numbers no longer get misclassified as IBAN.** The
+  Indian plate format (e.g. `KA05MH1234`) also happens to fit the (very
+  permissive) IBAN pattern's shape. An IBAN candidate is now skipped
+  when a vehicle-context label sits nearby, so a labelled plate number
+  is masked as `VEHICLE_NUMBER` instead of `IBAN`.
+
 ## 0.2.5
 
 ### Added

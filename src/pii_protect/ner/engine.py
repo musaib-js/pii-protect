@@ -80,6 +80,27 @@ _UPI_HANDLES = (
 _SWIFT_CONTEXT_WINDOW = 25
 _SWIFT_CONTEXT_RE = re.compile(r"\b(?:swift|bic)\b", re.IGNORECASE)
 
+# How close a plate/registration label must appear to a vehicle-number
+# candidate for it to be accepted. Vehicle plate shapes (a handful of
+# letters plus a handful of digits) are common to all sorts of other
+# codes -- invoice numbers, coupon codes, tracking numbers -- so, like
+# SWIFT above, shape alone isn't enough; only the plate token itself is
+# captured (the label is not part of the match).
+_VEHICLE_CONTEXT_WINDOW = 30
+_VEHICLE_CONTEXT_RE = re.compile(
+    r"\bplate\b|\bvehicle\s*(?:no\.?|number)\b|\bregistration\s*(?:no\.?|number)\b",
+    re.IGNORECASE,
+)
+
+
+def _has_nearby_context(
+    text: str, start: int, end: int, context_re: re.Pattern, window: int
+) -> bool:
+    """True if ``context_re`` matches within ``window`` chars either side of [start, end)."""
+    window_start = max(0, start - window)
+    window_end = min(len(text), end + window)
+    return bool(context_re.search(text[window_start:window_end]))
+
 
 class RegexPatternLibrary:
     """
@@ -172,6 +193,25 @@ class RegexPatternLibrary:
     PIN_NUMBER = re.compile(r"\bPIN\b\D{0,10}\d{4,6}\b", re.IGNORECASE)
     OTP_NUMBER = re.compile(r"\bOTP\b\D{0,10}\d{4,6}\b", re.IGNORECASE)
 
+    # Vehicle registration / license plate numbers. Only the plate token
+    # itself is matched (see _VEHICLE_CONTEXT_RE above -- a nearby
+    # "plate"/"vehicle no"/"registration no" label is required post-match,
+    # since these shapes alone are too generic -- e.g. an invoice or
+    # coupon code can easily look like a plate).
+    VEHICLE_NUMBER_IN = re.compile(
+        r"\b[A-Z]{2}[ -]?\d{1,2}[ -]?[A-Z]{1,3}[ -]?\d{4}\b"
+    )  # India, e.g. "KA05MH1234" / "MH-12-AB-1234"
+    VEHICLE_NUMBER_PH_SA = re.compile(
+        r"\b[A-Z]{3}[ -]?\d{3,4}\b"
+    )  # Philippines & Saudi Arabia share this shape, e.g. "NBC 1234" / "ABC 1234"
+    VEHICLE_NUMBER_AE = re.compile(
+        r"\b[A-Z]{1,3}[ -]?\d{1,5}\b"
+    )  # UAE, e.g. "A 12345" / "DXB-A-12345" (format varies by emirate)
+    VEHICLE_NUMBER_US = re.compile(
+        r"\b(?=[A-Z0-9]{5,8}\b)(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*[0-9])[A-Z0-9]{5,8}\b"
+    )  # US has no single federal format -- a 5-8 char letter+digit mix,
+    # relying on the nearby-label check above to stay precise
+
     PATTERNS: list[tuple[re.Pattern, EntityType, float]] = []
 
     @classmethod
@@ -216,6 +256,14 @@ class RegexPatternLibrary:
             (cls.MEDICAL_RECORD_NUMBER, EntityType.MEDICAL_RECORD_NUMBER, 0.88),
             (cls.PIN_NUMBER, EntityType.PIN, 0.90),
             (cls.OTP_NUMBER, EntityType.OTP, 0.90),
+            (
+                cls.VEHICLE_NUMBER_IN,
+                EntityType.VEHICLE_NUMBER,
+                0.80,
+            ),  # post-filtered by nearby plate/vehicle label, see below
+            (cls.VEHICLE_NUMBER_PH_SA, EntityType.VEHICLE_NUMBER, 0.75),
+            (cls.VEHICLE_NUMBER_AE, EntityType.VEHICLE_NUMBER, 0.70),
+            (cls.VEHICLE_NUMBER_US, EntityType.VEHICLE_NUMBER, 0.65),
         ]
 
 
@@ -241,6 +289,11 @@ class RegexNERLayer:
         label is how real-world SWIFT extraction narrows this down in
         practice, and matches how these codes actually appear in
         business documents ("SWIFT: DEUTDEFF", "BIC DEUTDEFF").
+      - VEHICLE_NUMBER candidates must appear within
+        ``_VEHICLE_CONTEXT_WINDOW`` characters of a "plate"/"vehicle
+        no"/"registration no" label. A few letters plus a few digits is
+        an extremely common shape (invoice codes, coupon codes, tracking
+        numbers), so it isn't distinctive enough to flag on its own.
 
     Note on PHONE patterns deliberately NOT included here: an earlier
     bare-7-digit pattern (`\\d{3}[-.\\s]?\\d{4}`) was removed. It both
@@ -286,6 +339,23 @@ class RegexNERLayer:
 
                 if entity_type == EntityType.SWIFT:
                     if len(value) not in (8, 11) or value[4:6] not in _ISO_3166_ALPHA2:
+                        continue
+
+                if entity_type == EntityType.IBAN:
+                    # The IBAN shape (2 letters + 2 digits + up to 30 alnum
+                    # chars) also happens to fit an Indian vehicle plate
+                    # (e.g. "KA05MH1234"). A real IBAN is never discussed
+                    # next to "plate"/"vehicle no"/"registration no" wording,
+                    # so treat that as a vehicle plate instead of an IBAN.
+                    if _has_nearby_context(
+                        text, match.start(), match.end(), _VEHICLE_CONTEXT_RE, _VEHICLE_CONTEXT_WINDOW
+                    ):
+                        continue
+
+                if entity_type == EntityType.VEHICLE_NUMBER:
+                    if not _has_nearby_context(
+                        text, match.start(), match.end(), _VEHICLE_CONTEXT_RE, _VEHICLE_CONTEXT_WINDOW
+                    ):
                         continue
 
                 spans.append(

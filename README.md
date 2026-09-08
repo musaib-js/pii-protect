@@ -410,12 +410,16 @@ text and merges their output into a single non-overlapping span list:
   `TIN` (BIR Tax Identification Number), `PH_GOVT_ID` (SSS/GSIS/
   PhilHealth/Pag-IBIG/UMID/PhilSys), `STUDENT_ID`, and
   `MEDICAL_RECORD_NUMBER` -- plus labelled `PIN`/`OTP` codes (a 4-6
-  digit number found near the word "PIN" or "OTP"). The Philippines IDs
-  and `STUDENT_ID`/`MEDICAL_RECORD_NUMBER`/`PIN`/`OTP` patterns require a
-  nearby label (e.g. "TIN", "SSS", "Student ID", "OTP") rather than
-  matching on digit shape alone -- those shapes are too generic
-  otherwise. `CREDIT_CARD` matches are Luhn-validated and `SWIFT`
-  matches are checked against real ISO 3166-1 country codes, so ordinary
+  digit number found near the word "PIN" or "OTP") and `VEHICLE_NUMBER`
+  (India, Philippines, US, UAE, Saudi Arabia license plates). The
+  Philippines IDs, `STUDENT_ID`/`MEDICAL_RECORD_NUMBER`/`PIN`/`OTP`, and
+  `VEHICLE_NUMBER` patterns all require a nearby label (e.g. "TIN",
+  "SSS", "Student ID", "OTP", "plate"/"vehicle no"/"registration no")
+  rather than matching on shape alone -- those shapes are too generic
+  otherwise (a plate number's letters+digits shape, for instance, is
+  indistinguishable from an invoice or coupon code without one).
+  `CREDIT_CARD` matches are Luhn-validated and `SWIFT` matches are
+  checked against real ISO 3166-1 country codes, so ordinary
   numbers/words that merely have the right shape aren't flagged as PII.
 - `GLiNERLayer` -- optional. Zero-shot on-premise NER for PERSON,
   ORGANISATION, ADDRESS, PASSPORT, DRIVING_LICENSE, USERNAME, and more.
