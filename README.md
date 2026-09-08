@@ -192,6 +192,29 @@ scrubbed = engine.redact("Contact john@acme.com about GST 27AAPFU0939F1ZV")
 
 ---
 
+## Excluding entity types from masking
+
+`mask()`, `mask_dict()`, and `redact()` all accept an `ignore_entities`
+list -- entity types the caller wants left untouched, even though they'd
+otherwise be detected. Useful when a field is expected to contain
+something that looks like PII but shouldn't be masked for this call (e.g.
+an organisation name that's actually public, or a PIN the consumer wants
+to keep visible in an internal log).
+
+```python
+result = await engine.mask(
+    "Vendor: Acme Corp, PIN: 4821, contact john@acme.com",
+    ignore_entities=["ORGANISATION", "PIN"],   # or [EntityType.ORGANISATION, EntityType.PIN]
+)
+# "Vendor: Acme Corp, PIN: 4821, contact {{EMAIL:...}}"
+```
+
+Matching is case-insensitive and accepts either `EntityType` members or
+plain strings. An ignored span is left exactly as detected -- nothing is
+encrypted, stored, or replaced for that span.
+
+---
+
 ## Working with dictionaries
 
 `mask_dict()` / `unmask_dict()` operate on JSON-serialisable Python
@@ -383,10 +406,17 @@ text and merges their output into a single non-overlapping span list:
 - `RegexNERLayer` -- always on, no extra dependencies. High-precision
   patterns for structured PII: GST, PAN, TAN, IFSC, ABN, VAT, UEN, CRN,
   IBAN, SWIFT, account/sort-code numbers, credit cards, email, UPI,
-  phone (India + international), invoice/PO references, URLs.
-  `CREDIT_CARD` matches are Luhn-validated and `SWIFT` matches are
-  checked against real ISO 3166-1 country codes, so ordinary numbers/words
-  that merely have the right shape aren't flagged as PII.
+  phone (India + international), URLs, and the Philippines-specific
+  `TIN` (BIR Tax Identification Number), `PH_GOVT_ID` (SSS/GSIS/
+  PhilHealth/Pag-IBIG/UMID/PhilSys), `STUDENT_ID`, and
+  `MEDICAL_RECORD_NUMBER` -- plus labelled `PIN`/`OTP` codes (a 4-6
+  digit number found near the word "PIN" or "OTP"). The Philippines IDs
+  and `STUDENT_ID`/`MEDICAL_RECORD_NUMBER`/`PIN`/`OTP` patterns require a
+  nearby label (e.g. "TIN", "SSS", "Student ID", "OTP") rather than
+  matching on digit shape alone -- those shapes are too generic
+  otherwise. `CREDIT_CARD` matches are Luhn-validated and `SWIFT`
+  matches are checked against real ISO 3166-1 country codes, so ordinary
+  numbers/words that merely have the right shape aren't flagged as PII.
 - `GLiNERLayer` -- optional. Zero-shot on-premise NER for PERSON,
   ORGANISATION, ADDRESS, PASSPORT, DRIVING_LICENSE, USERNAME, and more.
   Requires `pii-protect[gliner]`.

@@ -52,6 +52,12 @@ class EntityType(str, Enum):
     PASSPORT = "PASSPORT"
     DRIVING_LICENSE = "DRIVING_LICENSE"
     USERNAME = "USERNAME"
+    TIN = "TIN"  # Philippines BIR Tax Identification Number
+    PH_GOVT_ID = "PH_GOVT_ID"  # Philippines govt-issued ID (SSS/GSIS/PhilHealth/Pag-IBIG/UMID/PhilSys)
+    STUDENT_ID = "STUDENT_ID"
+    MEDICAL_RECORD_NUMBER = "MEDICAL_RECORD_NUMBER"
+    PIN = "PIN"
+    OTP = "OTP"
     CUSTOM = "CUSTOM"  # caller-declared PII (mask_dict_with_known_pii_keys) — not NER-detected
     JOB_TITLE = "JOB_TITLE"  # not NER-detected, but can be used for partial masking
     OTHER = "OTHER"

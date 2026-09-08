@@ -142,6 +142,36 @@ class RegexPatternLibrary:
     URL_NO_PROTOCOL = re.compile(r"\b(?:www\.)[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
     URL_FTP = re.compile(r"\bftp://[^\s/$.?#].[^\s]*\b", re.IGNORECASE)
 
+    # Philippines-specific IDs. Like ABN_NUMBER/ACCOUNT_NUM above, these match
+    # the label together with the value as one span (the label alone isn't
+    # PII, but requiring it in the match is what keeps a bare dashed-digit
+    # run from being flagged as a govt ID on shape alone).
+    TIN_NUMBER = re.compile(
+        r"\bTIN\s*:?\s*\d{3}-\d{3}-\d{3}(?:-\d{3,5})?\b", re.IGNORECASE
+    )  # BIR Tax Identification Number, e.g. "TIN: 123-456-789-000"
+    PH_GOVT_ID = re.compile(
+        r"\b(?:SSS|GSIS|PhilHealth|Pag-?IBIG|HDMF|UMID|PhilSys|PSN|"
+        r"National\s*ID|Government\s*ID|Govt\.?\s*ID)\s*(?:No\.?|Number|ID)?\s*:?\s*"
+        r"\d[\d\-]{7,19}\d\b",
+        re.IGNORECASE,
+    )  # SSS/GSIS/PhilHealth/Pag-IBIG/UMID/PhilSys National ID number
+    STUDENT_ID = re.compile(
+        r"\b(?:Student\s*(?:ID|No\.?|Number)|Matric(?:ulation)?\s*(?:ID|No\.?|Number))\s*:?\s*"
+        r"[A-Z0-9][A-Z0-9\-]{3,15}\b",
+        re.IGNORECASE,
+    )
+    MEDICAL_RECORD_NUMBER = re.compile(
+        r"\b(?:Medical\s*Record\s*(?:No\.?|Number)?|MRN|Patient\s*(?:ID|No\.?|Number))\s*:?\s*"
+        r"[A-Z0-9][A-Z0-9\-]{3,15}\b",
+        re.IGNORECASE,
+    )
+
+    # PIN / OTP: a labelled 4-6 digit code. The trailing \b keeps a 7+ digit
+    # number from being partially captured (same reasoning as the PHONE
+    # patterns above — see V-16/V-17).
+    PIN_NUMBER = re.compile(r"\bPIN\b\D{0,10}\d{4,6}\b", re.IGNORECASE)
+    OTP_NUMBER = re.compile(r"\bOTP\b\D{0,10}\d{4,6}\b", re.IGNORECASE)
+
     PATTERNS: list[tuple[re.Pattern, EntityType, float]] = []
 
     @classmethod
@@ -180,6 +210,12 @@ class RegexPatternLibrary:
             (cls.URL, EntityType.URL, 0.85),
             (cls.URL_NO_PROTOCOL, EntityType.URL, 0.80),
             (cls.URL_FTP, EntityType.URL, 0.80),
+            (cls.TIN_NUMBER, EntityType.TIN, 0.95),
+            (cls.PH_GOVT_ID, EntityType.PH_GOVT_ID, 0.92),
+            (cls.STUDENT_ID, EntityType.STUDENT_ID, 0.88),
+            (cls.MEDICAL_RECORD_NUMBER, EntityType.MEDICAL_RECORD_NUMBER, 0.88),
+            (cls.PIN_NUMBER, EntityType.PIN, 0.90),
+            (cls.OTP_NUMBER, EntityType.OTP, 0.90),
         ]
 
 
@@ -647,6 +683,8 @@ _FINANCIAL_ENTITIES = {
     EntityType.IFSC,
     EntityType.UEN,
     EntityType.CRN,
+    EntityType.TIN,
+    EntityType.PH_GOVT_ID,
 }
 
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.5
+
+### Added
+
+- **New Philippines-specific detection: TIN, government IDs, student IDs,
+  medical record numbers.** The regex layer now recognises the BIR Tax
+  Identification Number (`TIN`), government-issued IDs (`PH_GOVT_ID`:
+  SSS, GSIS, PhilHealth, Pag-IBIG, UMID, PhilSys), `STUDENT_ID`, and
+  `MEDICAL_RECORD_NUMBER`. Each requires a nearby label (e.g. "TIN",
+  "SSS", "Student ID") rather than matching on digit shape alone, since
+  these shapes are otherwise too generic to detect reliably.
+- **PIN and OTP codes are now masked.** A 4-6 digit number found near the
+  word "PIN" or "OTP" (case-insensitive) is now detected and masked as
+  `PIN`/`OTP` respectively.
+- **`ignore_entities` parameter on `mask()`, `mask_dict()`, and
+  `redact()`.** Callers can now pass a list of entity types (as
+  `EntityType` members or plain strings, e.g. `["ORGANISATION", "PIN"]`)
+  to exclude from masking for that call -- matching spans are left
+  exactly as detected instead of being tokenised/redacted.
+
 ## 0.2.4
 
 ### Fixed
