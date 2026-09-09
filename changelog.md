@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.8
+
+### Fixed
+
+- **Age groups being detected as persons** `mask()` used to detect age groups like minor, junior etc as persons because the label age group itself was missing. Added the label and put that into the ignored labelled list, so that it is not masked.
+
 ## 0.2.7
 
 ### Fixed

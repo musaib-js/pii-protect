@@ -393,6 +393,7 @@ _GLINER_TO_ENTITY = {
     "vendor name": EntityType.ORGANISATION,
     "ifsc code": EntityType.IFSC,
     "job title": EntityType.JOB_TITLE,
+    "age group": EntityType.AGE_GROUP,
 }
 
 
@@ -428,6 +429,7 @@ class GLiNERLayer:
         "customer name",
         "vendor name",
         "ifsc code",
+        "age group",
     )
 
     def __init__(
@@ -482,7 +484,7 @@ class GLiNERLayer:
                 entity_type = _GLINER_TO_ENTITY.get(
                     entity["label"].lower(), EntityType.OTHER
                 )
-                if entity_type is EntityType.JOB_TITLE:
+                if entity_type is EntityType.JOB_TITLE or entity_type is EntityType.AGE_GROUP:
                     continue
                 spans.append(
                     DetectedSpan(
