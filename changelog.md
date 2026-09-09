@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.7
+
+### Fixed
+
+- **PII detection no longer blocks the event loop.** `mask()` awaited
+  nothing before calling `_ner.detect()`, so detection — synchronous CPU
+  work, a regex sweep with the default layers and a GLiNER or transformer
+  forward pass with them enabled — ran inline and froze every other
+  coroutine in the process for its duration.
+
+  The cost compounded with concurrency. Nine simultaneous masks of a 1.1KB
+  text took 23.3s in total and all finished together at the end, because a
+  caller's read timeout is counted from when the request was sent rather
+  than when the server picked it up: requests at the back spent their whole
+  timeout queued and were cancelled having done no work, surfacing as
+  `httpx.ReadTimeout` rather than as slowness.
+
+  Detection now runs via `asyncio.to_thread`. The detector layers hold no
+  mutable state after construction — the models are read-only forward passes
+  and the span merger and conflict resolver take and return values — so they
+  are safe to enter from several threads. spaCy is the exception its own
+  docs warn about, and `enable_spacy` already defaults to `False`.
+
+  `redact()` makes the same inline call but is a sync function and is left
+  as it is; making it async would break its signature for every caller.
+  `unmask()` needed no change, as it runs no detection.
+
 ## 0.2.6
 
 ### Added
