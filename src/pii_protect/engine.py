@@ -33,6 +33,7 @@ Author: Musaib Altaf
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from copy import deepcopy
@@ -195,7 +196,20 @@ class PIIMaskingEngine:
         self._assert_initialised()
         self._assert_str(text, "text")
 
-        spans = self._ner.detect(text)
+        # Off the event loop: detection is synchronous CPU work — a regex
+        # sweep at best, a GLiNER/spaCy/transformer forward pass at worst,
+        # which has been measured at 2.5s for ~1KB. Awaiting it here rather
+        # than calling it inline means one slow mask no longer freezes every
+        # other coroutine in the process: with nine concurrent masks the
+        # ninth used to wait for all eight ahead of it and time out having
+        # done no work at all.
+        #
+        # The detector layers hold no mutable state after construction — the
+        # models are read-only forward passes and the span merger/resolver
+        # take and return values — so they are safe to enter from several
+        # threads. spaCy is the exception the docs warn about, and it is
+        # opt-in (enable_spacy defaults to False).
+        spans = await asyncio.to_thread(self._ner.detect, text)
         ignore_set = _normalise_ignore_entities(ignore_entities)
         if ignore_set:
             spans = [s for s in spans if s.entity_type.value not in ignore_set]
