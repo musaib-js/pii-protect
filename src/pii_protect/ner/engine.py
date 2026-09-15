@@ -35,9 +35,17 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional
+from pathlib import Path
+from typing import Optional, Sequence, Union
 
 from pii_protect.exceptions import InvalidInputError, OptionalDependencyMissingError
+from pii_protect.ner.domain import (
+    SOURCE as DOMAIN_SOURCE,
+    DomainEntity,
+    DomainEntityLayer,
+    domain_entities_from_env,
+    load_domain_entities,
+)
 from pii_protect.types import DetectedSpan, EntityType
 from pii_protect.ner.validators import _is_valid_gliner_entity, _luhn_is_valid, _verhoeff_is_valid
 
@@ -811,12 +819,15 @@ class SpanConflictResolver:
         Priority formula:
           base = confidence
           + 0.30 if regex_validated
+          + 0.20 if declared by domain configuration
           + 0.10 if financial entity
           + 0.001 * length (tie-breaker for longer spans)
         """
         score = span.confidence
         if span.is_regex_validated:
             score += 0.30
+        if span.source == DOMAIN_SOURCE:
+            score += 0.20
         if span.entity_type in _FINANCIAL_ENTITIES:
             score += 0.10
         score += 0.001 * span.length
@@ -891,6 +902,9 @@ class NEREngine:
         privacy_filter_model: Optional[str] = None,
         privacy_filter_threshold: float = 0.50,
         privacy_filter_device: str = "cpu",
+        domain_entities: Optional[
+            Union[str, Path, Sequence[Union[DomainEntity, dict]]]
+        ] = None,
     ) -> None:
         """
         Initialise the enabled NER layers. Models are loaded once and reused.
@@ -924,6 +938,12 @@ class NEREngine:
             Minimum pipeline `score` for an entity span to be accepted.
         privacy_filter_device : str
             'cpu' or 'cuda'.
+        domain_entities : Optional[str | Path | Sequence[DomainEntity | dict]]
+            Deployment-declared PII categories — a path to a JSON config
+            file, or the rules themselves. When omitted, the path in
+            ``PII_PROTECT_DOMAIN_ENTITIES`` is used if that variable is
+            set, so categories can be added with no code change at all.
+            See ``pii_protect.ner.domain``.
         """
         self._regex_layer = RegexNERLayer()
         self._spacy_layer = SpacyNERLayer(spacy_model) if enable_spacy else None
@@ -946,13 +966,22 @@ class NEREngine:
                 privacy_filter_model, privacy_filter_threshold, privacy_filter_device
             )
 
+        rules = (
+            load_domain_entities(domain_entities)
+            if domain_entities is not None
+            else domain_entities_from_env()
+        )
+        self._domain_layer = DomainEntityLayer(rules) if rules else None
+
         self._merger = TokenizerSafeSpanMerger()
         self._resolver = SpanConflictResolver()
         logger.info(
-            "NEREngine ready (layers: regex, gliner=%s, spacy=%s, privacy_filter=%s)",
+            "NEREngine ready (layers: regex, gliner=%s, spacy=%s, "
+            "privacy_filter=%s, domain=%s)",
             gliner_model if enable_gliner else "DISABLED",
             spacy_model if enable_spacy else "DISABLED",
             privacy_filter_model if enable_privacy_filter else "DISABLED",
+            len(rules) if rules else "DISABLED",
         )
 
     def detect(self, text: str) -> list[DetectedSpan]:
@@ -985,6 +1014,7 @@ class NEREngine:
             return []
 
         regex_spans = self._regex_layer.detect(text)
+        domain_spans = self._domain_layer.detect(text) if self._domain_layer else []
         gliner_spans = self._gliner_layer.detect(text) if self._gliner_layer else []
         spacy_spans = self._spacy_layer.detect(text) if self._spacy_layer else []
         privacy_filter_spans = (
@@ -993,12 +1023,20 @@ class NEREngine:
             else []
         )
 
-        all_spans = regex_spans + gliner_spans + spacy_spans + privacy_filter_spans
+        all_spans = (
+            regex_spans
+            + domain_spans
+            + gliner_spans
+            + spacy_spans
+            + privacy_filter_spans
+        )
         resolved = self._resolver.resolve(all_spans)
 
         logger.debug(
-            "NEREngine.detect: regex=%d gliner=%d spacy=%d privacy_filter=%d resolved=%d",
+            "NEREngine.detect: regex=%d domain=%d gliner=%d spacy=%d "
+            "privacy_filter=%d resolved=%d",
             len(regex_spans),
+            len(domain_spans),
             len(gliner_spans),
             len(spacy_spans),
             len(privacy_filter_spans),
