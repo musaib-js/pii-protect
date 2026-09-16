@@ -10,7 +10,7 @@ Coverage for the configurable domain-specific entity layer:
     ``PII_PROTECT_DOMAIN_ENTITIES`` environment variable;
   - malformed rules fail at load time with a message naming the problem.
 
-Author: Musaib Altaf
+Author: Neeraj Silavanuru
 """
 
 import json
