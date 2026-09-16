@@ -34,7 +34,7 @@ A declared name becomes a real ``EntityType`` member, so it flows through
 masking, token round-tripping, entity counts and partial-mask rules exactly
 like a built-in category.
 
-Author: Musaib Altaf
+Author: Neeraj Silavanuru
 """
 
 from __future__ import annotations
