@@ -7,6 +7,7 @@ Public API
 ----------
     PIIMaskingEngine   — mask() / unmask() / redact()
     NEREngine          — multi-layer PII detection (regex, spaCy, transformer)
+    DomainEntity       — a PII category declared in configuration
     EntityType         — canonical PII entity categories
     DetectedSpan        — a single detected PII span
     MaskResult, UnmaskResult, DetectedEntityInfo — result types
@@ -45,7 +46,14 @@ from pii_protect.exceptions import (
     StorageBackendError,
     StorageNotConnectedError,
 )
-from pii_protect.ner import NEREngine
+from pii_protect.ner import (
+    DomainEntity,
+    DomainEntityConfigError,
+    DomainEntityLayer,
+    NEREngine,
+    load_domain_entities,
+    register_entity_type,
+)
 from pii_protect.tokens import DeterministicTokenGenerator
 from pii_protect.types import (
     DetectedEntityInfo,
@@ -56,11 +64,16 @@ from pii_protect.types import (
     UnmaskResult,
 )
 
-__version__ = "0.2.8"
+__version__ = "0.2.9"
 
 __all__ = [
     "PIIMaskingEngine",
     "NEREngine",
+    "DomainEntity",
+    "DomainEntityLayer",
+    "DomainEntityConfigError",
+    "load_domain_entities",
+    "register_entity_type",
     "EntityType",
     "DetectedSpan",
     "TokenRecord",

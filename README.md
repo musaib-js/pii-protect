@@ -588,6 +588,92 @@ prefetch_privacy_filter("your/token-classification-model")     # only if you use
 
 ---
 
+## Domain-specific entity categories
+
+The built-in categories are the ones this library ships. Your deployment
+almost certainly has its own -- a bank's customer reference, an insurer's
+policy code, a telco's subscriber ID. Declare them in configuration rather
+than waiting on a library release.
+
+Write the rules as JSON:
+
+```json
+[
+  {
+    "name": "CUSTOMER_REFERENCE",
+    "pattern": "\\bCRN-\\d{8}\\b",
+    "confidence": 0.95
+  },
+  {
+    "name": "POLICY_NUMBER",
+    "pattern": "\\bPOL\\d{6}\\b",
+    "context_words": ["policy", "cover note"],
+    "context_window": 40
+  }
+]
+```
+
+and point the engine at them:
+
+```python
+from pii_protect import NEREngine
+
+ner = NEREngine(domain_entities="domain_entities.json")
+```
+
+Or set `PII_PROTECT_DOMAIN_ENTITIES` to that path and pass nothing at all --
+an already-deployed service picks up new categories with no code change:
+
+```bash
+export PII_PROTECT_DOMAIN_ENTITIES=/etc/pii/domain_entities.json
+```
+
+A declared name becomes a real `EntityType`, so it behaves like any built-in
+category everywhere downstream:
+
+```python
+result = await engine.mask("Please quote CRN-45012398 when you call.")
+# "Please quote {{CUSTOMER_REFERENCE:a1b2c3d4}} when you call."
+
+result.entity_counts       # {"CUSTOMER_REFERENCE": 1}
+await engine.unmask(result.masked_text)       # round-trips
+engine.redact(text)                            # "[REDACTED:CUSTOMER_REFERENCE]"
+await engine.mask(text, ignore_entities=["CUSTOMER_REFERENCE"])   # opt out
+```
+
+### Rule fields
+
+| Field | Required | Meaning |
+|---|---|---|
+| `name` | yes | The category, `UPPER_SNAKE_CASE`. Appears in tokens and entity counts. Naming an existing category (e.g. `ACCOUNT`) adds a pattern to it instead of creating a new one. |
+| `pattern` | yes | Regular expression. Anchor it with `\b` -- an unanchored pattern matches inside longer words. Inline flags like `(?i)` are honoured. |
+| `confidence` | no | 0-1, default `0.90`. Settles overlaps against other layers. |
+| `context_words` | no | The match only counts when one of these words appears nearby. |
+| `context_window` | no | Characters either side to search for `context_words`, default `40`. |
+
+**`context_words` is how you make a loose shape safe.** `\d{8}` on its own
+matches any eight-digit number in the document; `\d{8}` within 40 characters
+of "customer reference" is almost certainly the thing you meant.
+
+A configured rule outranks a built-in category when the two match the same
+span -- the deployment declaring what its own identifiers look like is the
+better authority. Rules are validated when they load, so a bad regex, an
+out-of-range confidence or a misspelt field fails at startup with a message
+naming the rule, not silently at detection time.
+
+Rules can also be passed directly, for callers that keep configuration in
+YAML or a database:
+
+```python
+from pii_protect import DomainEntity, NEREngine
+
+ner = NEREngine(domain_entities=[
+    DomainEntity(name="TICKET_ID", pattern=r"\bTKT-\d{5}\b"),
+])
+```
+
+---
+
 ## Storage backend examples
 
 ```python
