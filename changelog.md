@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.3.0
+
+### Added
+
+ - Domain-specific entity detection now runs through GLiNER instead of regex-only rules.
+  Deployments can declare custom categories using natural-language labels like "customer reference number" or "policy number" rather than regex patterns.
+  domain_entities accepts:
+  JSON files
+  rule dicts
+  bare label strings
+  DomainEntity objects
+  A configured rule can specify:
+  label
+  name (defaults to an uppercase snake_case name derived from the label)
+  threshold
+  context_words
+  context_window
+  detect_entities was added as the per-call mirror of ignore_entities, so callers can detect extra categories for a single operation without changing global config.
+  Changed
+
+  The domain entity layer moved from regex matching to zero-shot GLiNER detection.
+  Matching logic now uses GLiNER labels as the source of truth, with optional contextual gating via context_words.
+  Rule validation is stricter and fails at startup for malformed config instead of silently allowing bad inputs.
+  Default category names are derived from labels instead of requiring a manual name on every rule.
+  Built-in and custom entities are merged through the same detection pipeline.
+  Behavioral notes
+
+  Declaring any domain entity implies GLiNER should be enabled.
+  allow_detect_entities=True can load GLiNER even when no domain categories are configured up front.
+  A rule naming an existing category now routes matches into that category rather than creating a duplicate category.
+  A rule with a matching context_words window only counts when nearby wording matches, which is useful for loose identifiers like numeric codes.
+  Migration / breaking change
+
+  The config format changed significantly:
+  pattern is replaced by label
+  confidence is replaced by threshold
+  Existing regex-based domain configs will need to be rewritten in the new label-based model.
+
 ## 0.2.9
 
 ### Added
