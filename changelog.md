@@ -4,27 +4,36 @@
 
 ### Added
 
-- **Domain-specific entity layer.** Deployments can declare their own PII
-  categories in configuration instead of waiting for a library release.
-  `NEREngine(domain_entities="rules.json")` takes a JSON file, a list of
-  dicts, or `DomainEntity` objects; setting `PII_PROTECT_DOMAIN_ENTITIES`
-  to a config path adds categories to an already-deployed service with no
-  code change at all.
+- **Domain-specific entity layer, detected by GLiNER.** Deployments can
+  declare their own PII categories in configuration instead of waiting for a
+  library release. `NEREngine(domain_entities="rules.json")` takes a JSON
+  file, a list of dicts, bare label strings, or `DomainEntity` objects;
+  setting `PII_PROTECT_DOMAIN_ENTITIES` to a config path adds categories to
+  an already-deployed service with no code change at all.
 
-  Each rule is a name, a regex, an optional confidence, and optional
-  `context_words` that require nearby wording before a match counts --
-  which is what lets a loose shape like eight digits be declared safely.
+  A rule is a GLiNER label -- a plain-English phrase such as `"customer
+  reference number"` -- plus an optional `name`, `threshold`, and
+  `context_words` that require nearby wording before a match counts. The
+  categories are found zero-shot by the same model as the built-in ones, so
+  declaring any implies `enable_gliner=True`.
 
   A declared name is registered as a real `EntityType` member, so it flows
   through masking, token round-tripping, `redact()`, `ignore_entities`,
   entity counts and partial-mask rules exactly like a built-in category.
-  Naming an existing category adds a pattern to it rather than creating a
-  new one. Rules are validated when they load, so a bad pattern fails at
-  startup with a message naming the rule.
+  Naming an existing category routes matches to it rather than creating a
+  new one. Rules are validated when they load, so a malformed one fails at
+  startup with a message naming it.
 
   When a configured rule and a built-in category match the same span, the
   configured rule wins -- a deployment describing its own identifiers is
   the better authority than a general-purpose pattern.
+
+- **`detect_entities`, the mirror image of `ignore_entities`.** `mask()`,
+  `mask_dict()` and `redact()` take a list of categories to detect for that
+  call only, in the same shapes `domain_entities` accepts:
+  `await engine.mask(text, detect_entities=["policy number"])`. Pass
+  `allow_detect_entities=True` to `NEREngine` to load GLiNER for it when no
+  categories are configured up front.
 
 ## 0.2.8
 

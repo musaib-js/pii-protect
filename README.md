@@ -595,18 +595,17 @@ almost certainly has its own -- a bank's customer reference, an insurer's
 policy code, a telco's subscriber ID. Declare them in configuration rather
 than waiting on a library release.
 
-Write the rules as JSON:
+Write the rules as JSON. A rule is a **GLiNER label** -- a plain-English
+phrase the zero-shot model is asked to find, not a code or a regex:
 
 ```json
 [
   {
-    "name": "CUSTOMER_REFERENCE",
-    "pattern": "\\bCRN-\\d{8}\\b",
-    "confidence": 0.95
+    "label": "customer reference number",
+    "name": "CUSTOMER_REFERENCE"
   },
   {
-    "name": "POLICY_NUMBER",
-    "pattern": "\\bPOL\\d{6}\\b",
+    "label": "policy number",
     "context_words": ["policy", "cover note"],
     "context_window": 40
   }
@@ -620,6 +619,10 @@ from pii_protect import NEREngine
 
 ner = NEREngine(domain_entities="domain_entities.json")
 ```
+
+Declaring categories loads GLiNER, since that is the model that finds them --
+`enable_gliner=True` is implied. The weights must already be cached; warm them
+with `pii_protect.ner.prefetch.prefetch_gliner()` as part of provisioning.
 
 Or set `PII_PROTECT_DOMAIN_ENTITIES` to that path and pass nothing at all --
 an already-deployed service picks up new categories with no code change:
@@ -645,32 +648,52 @@ await engine.mask(text, ignore_entities=["CUSTOMER_REFERENCE"])   # opt out
 
 | Field | Required | Meaning |
 |---|---|---|
-| `name` | yes | The category, `UPPER_SNAKE_CASE`. Appears in tokens and entity counts. Naming an existing category (e.g. `ACCOUNT`) adds a pattern to it instead of creating a new one. |
-| `pattern` | yes | Regular expression. Anchor it with `\b` -- an unanchored pattern matches inside longer words. Inline flags like `(?i)` are honoured. |
-| `confidence` | no | 0-1, default `0.90`. Settles overlaps against other layers. |
+| `label` | yes | The phrase GLiNER is asked to find, e.g. `"customer reference number"`. Lowercase and descriptive: the model reads it as English, so a noun phrase finds far more than an abbreviation. |
+| `name` | no | The category, `UPPER_SNAKE_CASE`. Defaults to the label upper-cased (`policy number` -> `POLICY_NUMBER`). Naming an existing category (e.g. `ACCOUNT`) routes matches to it instead of creating a new one. |
+| `threshold` | no | Minimum model score for this label, overriding the GLiNER layer's own. Lower it for a label the model is hesitant about. |
 | `context_words` | no | The match only counts when one of these words appears nearby. |
 | `context_window` | no | Characters either side to search for `context_words`, default `40`. |
 
-**`context_words` is how you make a loose shape safe.** `\d{8}` on its own
-matches any eight-digit number in the document; `\d{8}` within 40 characters
-of "customer reference" is almost certainly the thing you meant.
+**Write labels the way you would describe the value to a colleague.** GLiNER
+is zero-shot: it finds `"policy number"` from the phrase itself, with no
+pattern and no training. What it cannot do is recognise an opaque code with no
+surrounding cue -- a bare `48210033` in a table cell has nothing to go on. For
+those, `context_words` is the gate: the match only counts when "customer
+reference" appears within `context_window` characters.
 
 A configured rule outranks a built-in category when the two match the same
 span -- the deployment declaring what its own identifiers look like is the
-better authority. Rules are validated when they load, so a bad regex, an
-out-of-range confidence or a misspelt field fails at startup with a message
+better authority. Rules are validated when they load, so an empty label, an
+out-of-range threshold or a misspelt field fails at startup with a message
 naming the rule, not silently at detection time.
 
-Rules can also be passed directly, for callers that keep configuration in
-YAML or a database:
+Rules can also be passed directly -- as `DomainEntity` objects, dicts, or bare
+label strings -- for callers that keep configuration in YAML or a database:
 
 ```python
 from pii_protect import DomainEntity, NEREngine
 
 ner = NEREngine(domain_entities=[
-    DomainEntity(name="TICKET_ID", pattern=r"\bTKT-\d{5}\b"),
+    DomainEntity(label="support ticket id", name="TICKET_ID"),
+    "subscriber id",
 ])
 ```
+
+### Adding a category for one call
+
+`detect_entities` is the mirror image of `ignore_entities`: where one drops
+categories for a single call, the other adds them.
+
+```python
+result = await engine.mask(text, detect_entities=["policy number"])
+result.entity_counts       # {"POLICY_NUMBER": 1}
+```
+
+It takes the same things `domain_entities` does -- a label, a rule dict, or a
+`DomainEntity` -- and works on `mask()`, `mask_dict()` and `redact()`. It needs
+a loaded GLiNER layer, so construct the engine with `enable_gliner=True`, with
+`domain_entities=...`, or with `allow_detect_entities=True` when there are no
+configured categories but callers should still be able to pass their own.
 
 ---
 

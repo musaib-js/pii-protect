@@ -43,6 +43,7 @@ from pii_protect.ner.domain import (
     SOURCE as DOMAIN_SOURCE,
     DomainEntity,
     DomainEntityLayer,
+    DomainEntityConfigError,
     domain_entities_from_env,
     load_domain_entities,
 )
@@ -468,43 +469,61 @@ class GLiNERLayer:
         self._max_chars = max_chars_per_chunk
         logger.info("GLiNER model loaded.")
 
-    def detect(self, text: str) -> list[DetectedSpan]:
-        """Run GLiNER against the input text."""
-        if not text.strip():
+    def predict(
+        self,
+        text: str,
+        labels: Sequence[str],
+        threshold: Optional[float] = None,
+    ) -> list[dict]:
+        """Raw model output for ``labels``, with chunk offsets already applied.
+
+        The model takes its labels per call, so any caller — this layer's own
+        built-in list, or the domain layer's configured categories — asks the
+        one loaded model for the labels it cares about. Offsets are relative
+        to ``text``, not to the chunk the entity was found in.
+        """
+        if not text.strip() or not labels:
             return []
 
-        spans: list[DetectedSpan] = []
+        cutoff = self._threshold if threshold is None else threshold
+        entities: list[dict] = []
         offset = 0
         for chunk in self._chunk_text(text, self._max_chars):
-            entities = self._model.predict_entities(
-                chunk, labels=self._labels, threshold=self._threshold
-            )
-            for entity in entities:
-                label = entity["label"].lower()
-                score = float(entity["score"])
-                value = entity["text"]
-                if not _is_valid_gliner_entity(
-                        text=value,
-                        label=label,
-                        score=score,
-                    ):
-                        continue
-                entity_type = _GLINER_TO_ENTITY.get(
-                    entity["label"].lower(), EntityType.OTHER
-                )
-                if entity_type is EntityType.JOB_TITLE or entity_type is EntityType.AGE_GROUP:
-                    continue
-                spans.append(
-                    DetectedSpan(
-                        start=offset + entity["start"],
-                        end=offset + entity["end"],
-                        text=entity["text"],
-                        entity_type=entity_type,
-                        confidence=float(entity["score"]),
-                        source="gliner",
-                    )
+            for entity in self._model.predict_entities(
+                chunk, labels=list(labels), threshold=cutoff
+            ):
+                entities.append(
+                    {
+                        **entity,
+                        "start": offset + entity["start"],
+                        "end": offset + entity["end"],
+                    }
                 )
             offset += len(chunk)
+        return entities
+
+    def detect(self, text: str) -> list[DetectedSpan]:
+        """Run GLiNER's built-in label set against the input text."""
+        spans: list[DetectedSpan] = []
+        for entity in self.predict(text, self._labels):
+            label = entity["label"].lower()
+            score = float(entity["score"])
+            value = entity["text"]
+            if not _is_valid_gliner_entity(text=value, label=label, score=score):
+                continue
+            entity_type = _GLINER_TO_ENTITY.get(label, EntityType.OTHER)
+            if entity_type is EntityType.JOB_TITLE or entity_type is EntityType.AGE_GROUP:
+                continue
+            spans.append(
+                DetectedSpan(
+                    start=entity["start"],
+                    end=entity["end"],
+                    text=value,
+                    entity_type=entity_type,
+                    confidence=score,
+                    source="gliner",
+                )
+            )
         return sorted(spans, key=lambda span: span.start)
 
     def _chunk_text(self, text: str, max_chars: int) -> list[str]:
@@ -905,6 +924,7 @@ class NEREngine:
         domain_entities: Optional[
             Union[str, Path, Sequence[Union[DomainEntity, dict]]]
         ] = None,
+        allow_detect_entities: bool = False,
     ) -> None:
         """
         Initialise the enabled NER layers. Models are loaded once and reused.
@@ -943,7 +963,14 @@ class NEREngine:
             file, or the rules themselves. When omitted, the path in
             ``PII_PROTECT_DOMAIN_ENTITIES`` is used if that variable is
             set, so categories can be added with no code change at all.
-            See ``pii_protect.ner.domain``.
+            Declaring any implies ``enable_gliner=True``, since this is the
+            model that finds them. See ``pii_protect.ner.domain``.
+        allow_detect_entities : bool
+            Load GLiNER even with no categories configured, so that callers
+            can pass ad-hoc ones per call via ``detect_entities``. Without
+            this (and without ``enable_gliner``) there is no model loaded to
+            ask, and ``detect_entities`` raises rather than silently finding
+            nothing.
         """
         self._regex_layer = RegexNERLayer()
         self._spacy_layer = SpacyNERLayer(spacy_model) if enable_spacy else None
@@ -971,7 +998,28 @@ class NEREngine:
             if domain_entities is not None
             else domain_entities_from_env()
         )
-        self._domain_layer = DomainEntityLayer(rules) if rules else None
+
+        # Domain categories are found by the same GLiNER model as the
+        # built-in ones, so configuring them turns the layer on. Loading it
+        # silently here beats raising at construction over a flag the caller
+        # has already implied by declaring the categories.
+        if (rules or allow_detect_entities) and self._gliner_layer is None:
+            logger.info(
+                "Loading GLiNER for domain entity detection "
+                "(enable_gliner was not set)."
+            )
+            self._gliner_layer = GLiNERLayer(
+                model_name=gliner_model,
+                threshold=gliner_threshold,
+                local_files_only=gliner_local_files_only,
+            )
+            enable_gliner = True
+
+        self._domain_layer = (
+            DomainEntityLayer(rules, self._gliner_layer)
+            if self._gliner_layer is not None
+            else None
+        )
 
         self._merger = TokenizerSafeSpanMerger()
         self._resolver = SpanConflictResolver()
@@ -984,7 +1032,11 @@ class NEREngine:
             len(rules) if rules else "DISABLED",
         )
 
-    def detect(self, text: str) -> list[DetectedSpan]:
+    def detect(
+        self,
+        text: str,
+        detect_entities: Optional[Sequence[Union[str, dict, DomainEntity]]] = None,
+    ) -> list[DetectedSpan]:
         """
         Run all enabled detection layers and return merged, conflict-resolved spans.
 
@@ -992,6 +1044,12 @@ class NEREngine:
         ----------
         text : str
             Input document text (should be normalised plain text).
+        detect_entities : Optional[Sequence[str | dict | DomainEntity]]
+            Extra domain categories for this call only — the mirror image of
+            ``ignore_entities``. Each is a GLiNER label (``"policy number"``)
+            or a full rule dict. Requires a GLiNER layer: either
+            ``enable_gliner``, configured ``domain_entities``, or
+            ``allow_detect_entities=True``.
 
         Returns
         -------
@@ -1013,8 +1071,18 @@ class NEREngine:
         if not text.strip():
             return []
 
+        extra_rules = load_domain_entities(detect_entities) if detect_entities else []
+        if extra_rules and self._domain_layer is None:
+            raise DomainEntityConfigError(
+                "detect_entities needs the GLiNER layer, which is not loaded. "
+                "Construct NEREngine with enable_gliner=True, with "
+                "domain_entities=..., or with allow_detect_entities=True."
+            )
+
         regex_spans = self._regex_layer.detect(text)
-        domain_spans = self._domain_layer.detect(text) if self._domain_layer else []
+        domain_spans = (
+            self._domain_layer.detect(text, extra_rules) if self._domain_layer else []
+        )
         gliner_spans = self._gliner_layer.detect(text) if self._gliner_layer else []
         spacy_spans = self._spacy_layer.detect(text) if self._spacy_layer else []
         privacy_filter_spans = (
