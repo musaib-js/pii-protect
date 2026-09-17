@@ -3,6 +3,7 @@
 __pycache__
 .env
 .pypirc
+/build
 /dist
 *.egg-info
 /scripts

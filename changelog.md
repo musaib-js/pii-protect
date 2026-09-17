@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.3.1
+
+### Fixed
+
+- **A token now carries the category it was detected as.** Deduplication
+  matches on the value alone, and `_store_span` returned the token it found
+  before the entity type was consulted. A value masked once as one category
+  and later detected as another was handed back the first token ever minted
+  for it, still wearing the first category's label -- the placeholder said the
+  wrong thing, the vault stored the wrong thing, and no amount of
+  reconfiguring the detector changed either.
+
+  This surfaced as soon as deployments began declaring their own categories: a
+  word reclaimed from `PERSON` by a domain label kept masking as `PERSON`. The
+  stored record's category is now checked before its token is reused, and a
+  mismatch mints a token for the category actually detected. Tokens derive
+  from the category as well as the value, so the two cannot collide, and
+  re-masking under the original category still finds its original token.
+  Deduplication within a category, scope isolation and the unmask round-trip
+  are unchanged.
+
+### Changed
+
+- **Which of GLiNER's categories are discarded is now a deployment's choice.**
+  `JOB_TITLE` and `AGE_GROUP` were skipped by a hardcoded check.
+  `NEREngine(gliner_skip_entities=[...])` replaces that list, taking
+  `EntityType` members or plain strings, with `GLiNERLayer.DEFAULT_SKIPPED_ENTITIES`
+  as the default when nothing is passed.
+
+  Both categories are asked about so the model does not file them under
+  something that *is* masked, while neither is private on its own. Naming a
+  category here is also how to deal with a recurring false positive: give the
+  model a truer label for what it keeps mislabelling, then discard that
+  label's answers.
+
 ## 0.3.0
 
 ### Added

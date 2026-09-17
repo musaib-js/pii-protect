@@ -36,7 +36,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Optional, Sequence, Union
+from typing import Iterable, Optional, Sequence, Union
 
 from pii_protect.exceptions import InvalidInputError, OptionalDependencyMissingError
 from pii_protect.ner.domain import (
@@ -100,6 +100,17 @@ _VEHICLE_CONTEXT_RE = re.compile(
     r"\bplate\b|\bvehicle\s*(?:no\.?|number)\b|\bregistration\s*(?:no\.?|number)\b",
     re.IGNORECASE,
 )
+
+
+def _normalise_entity_names(
+    entities: Iterable[Union[str, "EntityType"]],
+) -> frozenset[str]:
+    """Entity types, as names, from members or plain strings either way."""
+    return frozenset(
+        (item.value if isinstance(item, EntityType) else str(item).strip().upper())
+        for item in entities
+        if str(item).strip()
+    )
 
 
 def _has_nearby_context(
@@ -441,6 +452,16 @@ class GLiNERLayer:
         "age group",
     )
 
+    #: Categories the model is asked about but whose answers are discarded.
+    #: A job title and an age bracket are asked for because naming them keeps
+    #: the model from filing them under something that *is* masked — "Senior
+    #: Manager" reads as a person otherwise — but neither is itself private.
+    #:
+    #: A deployment can change this. Adding a category is how to stop a
+    #: recurring false positive: give the model a truer label for the thing it
+    #: is mislabelling, then discard that label's answers.
+    DEFAULT_SKIPPED_ENTITIES = (EntityType.JOB_TITLE, EntityType.AGE_GROUP)
+
     def __init__(
         self,
         model_name: str = "gliner-community/gliner_small-v2.5",
@@ -448,6 +469,7 @@ class GLiNERLayer:
         labels: Optional[tuple[str, ...]] = None,
         max_chars_per_chunk: int = 4000,
         local_files_only: bool = True,
+        skip_entities: Optional[Iterable[Union[str, EntityType]]] = None,
     ) -> None:
         try:
             from gliner import GLiNER
@@ -467,7 +489,13 @@ class GLiNERLayer:
         self._threshold = threshold
         self._labels = labels or self.DEFAULT_LABELS
         self._max_chars = max_chars_per_chunk
-        logger.info("GLiNER model loaded.")
+        self._skipped = _normalise_entity_names(
+            self.DEFAULT_SKIPPED_ENTITIES if skip_entities is None else skip_entities
+        )
+        logger.info(
+            "GLiNER model loaded (skipping: %s).",
+            ", ".join(sorted(self._skipped)) or "nothing",
+        )
 
     def predict(
         self,
@@ -512,7 +540,7 @@ class GLiNERLayer:
             if not _is_valid_gliner_entity(text=value, label=label, score=score):
                 continue
             entity_type = _GLINER_TO_ENTITY.get(label, EntityType.OTHER)
-            if entity_type is EntityType.JOB_TITLE or entity_type is EntityType.AGE_GROUP:
+            if entity_type.value in self._skipped:
                 continue
             spans.append(
                 DetectedSpan(
@@ -925,6 +953,7 @@ class NEREngine:
             Union[str, Path, Sequence[Union[DomainEntity, dict]]]
         ] = None,
         allow_detect_entities: bool = False,
+        gliner_skip_entities: Optional[Iterable[Union[str, EntityType]]] = None,
     ) -> None:
         """
         Initialise the enabled NER layers. Models are loaded once and reused.
@@ -981,6 +1010,7 @@ class NEREngine:
                 model_name=gliner_model,
                 threshold=gliner_threshold,
                 local_files_only=gliner_local_files_only,
+                skip_entities=gliner_skip_entities,
             )
 
         self._privacy_filter_layer: Optional[PrivacyFilterLayer] = None
@@ -1012,6 +1042,7 @@ class NEREngine:
                 model_name=gliner_model,
                 threshold=gliner_threshold,
                 local_files_only=gliner_local_files_only,
+                skip_entities=gliner_skip_entities,
             )
             enable_gliner = True
 
