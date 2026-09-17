@@ -37,7 +37,7 @@ import asyncio
 import json
 import logging
 from copy import deepcopy
-from typing import Any, Iterable, Optional, Union
+from typing import Any, Iterable, Optional, Sequence, Union
 
 from pii_protect.crypto import AESGCMCipher
 from pii_protect.exceptions import (
@@ -47,6 +47,7 @@ from pii_protect.exceptions import (
     TokenCollisionError,
 )
 from pii_protect.ner import NEREngine
+from pii_protect.ner.domain import DomainEntity
 from pii_protect.partial_mask import render_partial_mask as _render_partial_mask
 from pii_protect.storage.base import StorageBackend
 from pii_protect.tokens import DeterministicTokenGenerator
@@ -62,6 +63,11 @@ from pii_protect.types import (
 logger = logging.getLogger(__name__)
 
 IgnoreEntities = Optional[Iterable[Union[str, EntityType]]]
+
+#: Extra domain categories to detect for one call only — the mirror image of
+#: ``IgnoreEntities``. Each item is a GLiNER label ("policy number") or a full
+#: rule dict; see ``pii_protect.ner.domain``.
+DetectEntities = Optional[Sequence[Union[str, dict, DomainEntity]]]
 
 
 def _normalise_ignore_entities(ignore_entities: IgnoreEntities) -> set[str]:
@@ -158,6 +164,7 @@ class PIIMaskingEngine:
         text: str,
         scope: Optional[str] = None,
         ignore_entities: IgnoreEntities = None,
+        detect_entities: DetectEntities = None,
     ) -> MaskResult:
         """
         Detect PII in ``text``, encrypt each detected value, persist it to
@@ -182,6 +189,14 @@ class PIIMaskingEngine:
             span whose entity type is in this list is left in the output
             exactly as detected, untouched and unmasked. Matching is
             case-insensitive on the entity type name.
+        detect_entities : Optional[Sequence[str | dict | DomainEntity]]
+            Extra PII categories to look for on this call — the mirror
+            image of ``ignore_entities``. Each is a GLiNER label, e.g.
+            ``["policy number", "customer reference number"]``, or a full
+            rule dict. Matches are masked under an entity type named after
+            the label (``POLICY_NUMBER``), exactly like a configured
+            ``domain_entities`` category. Requires the GLiNER layer — see
+            ``NEREngine(allow_detect_entities=True)``.
 
         Returns
         -------
@@ -209,7 +224,10 @@ class PIIMaskingEngine:
         # take and return values — so they are safe to enter from several
         # threads. spaCy is the exception the docs warn about, and it is
         # opt-in (enable_spacy defaults to False).
-        spans = await asyncio.to_thread(self._ner.detect, text)
+        # Only passed when asked for: ``ner_engine`` is an injection point, and
+        # a caller's own detector predates this argument.
+        detect_args = (text, detect_entities) if detect_entities else (text,)
+        spans = await asyncio.to_thread(self._ner.detect, *detect_args)
         ignore_set = _normalise_ignore_entities(ignore_entities)
         if ignore_set:
             spans = [s for s in spans if s.entity_type.value not in ignore_set]
@@ -253,6 +271,7 @@ class PIIMaskingEngine:
         data: dict,
         scope: Optional[str] = None,
         ignore_entities: IgnoreEntities = None,
+        detect_entities: DetectEntities = None,
     ) -> dict:
         """
         Deep-mask a JSON-serialisable dict/list structure by masking
@@ -271,11 +290,13 @@ class PIIMaskingEngine:
         same token, since every leaf goes through the same storage
         backend's scope-aware dedup index.
 
-        ``ignore_entities`` is applied the same way as in ``mask()`` — see
-        there for details.
+        ``ignore_entities`` and ``detect_entities`` are applied the same
+        way as in ``mask()`` — see there for details.
         """
         self._assert_initialised()
-        return await self._mask_walk(deepcopy(data), scope, ignore_entities)
+        return await self._mask_walk(
+            deepcopy(data), scope, ignore_entities, detect_entities
+        )
 
     async def mask_dict_with_known_pii_keys(
         self,
@@ -420,7 +441,12 @@ class PIIMaskingEngine:
 
     # ── Redact (irreversible) ────────────────────────────────────────────
 
-    def redact(self, text: str, ignore_entities: IgnoreEntities = None) -> str:
+    def redact(
+        self,
+        text: str,
+        ignore_entities: IgnoreEntities = None,
+        detect_entities: DetectEntities = None,
+    ) -> str:
         """
         Detect PII in ``text`` and replace each occurrence with a generic
         ``[REDACTED:TYPE]`` marker.
@@ -434,6 +460,8 @@ class PIIMaskingEngine:
         ignore_entities : Optional[Iterable[str | EntityType]]
             Entity types to skip — see ``mask()`` for details. A detected
             span of an ignored type is left untouched in the output.
+        detect_entities : Optional[Sequence[str | dict | DomainEntity]]
+            Extra categories to look for — see ``mask()`` for details.
 
         Raises
         ------
@@ -441,7 +469,11 @@ class PIIMaskingEngine:
             If ``text`` is not a string.
         """
         self._assert_str(text, "text")
-        spans = self._ner.detect(text)
+        spans = (
+            self._ner.detect(text, detect_entities)
+            if detect_entities
+            else self._ner.detect(text)
+        )
         ignore_set = _normalise_ignore_entities(ignore_entities)
         if ignore_set:
             spans = [s for s in spans if s.entity_type.value not in ignore_set]
@@ -719,28 +751,43 @@ class PIIMaskingEngine:
         )
 
     async def _mask_walk(
-        self, obj: Any, scope: Optional[str], ignore_entities: IgnoreEntities = None
+        self,
+        obj: Any,
+        scope: Optional[str],
+        ignore_entities: IgnoreEntities = None,
+        detect_entities: DetectEntities = None,
     ) -> Any:
         if isinstance(obj, dict):
             return {
-                k: await self._mask_walk(v, scope, ignore_entities)
+                k: await self._mask_walk(v, scope, ignore_entities, detect_entities)
                 for k, v in obj.items()
             }
         if isinstance(obj, list):
             return [
-                await self._mask_walk(item, scope, ignore_entities) for item in obj
+                await self._mask_walk(item, scope, ignore_entities, detect_entities)
+                for item in obj
             ]
         if isinstance(obj, bool) or obj is None:
             return obj
         if isinstance(obj, str):
-            result = await self.mask(obj, scope=scope, ignore_entities=ignore_entities)
+            result = await self.mask(
+                obj,
+                scope=scope,
+                ignore_entities=ignore_entities,
+                detect_entities=detect_entities,
+            )
             return result.masked_text
         if isinstance(obj, (int, float)):
             # PII can show up as a bare number (e.g. a phone field stored as an int).
             # Detect against the stringified form; only convert the leaf to a string
             # if something was actually masked, otherwise keep the original type.
             as_text = str(obj)
-            result = await self.mask(as_text, scope=scope, ignore_entities=ignore_entities)
+            result = await self.mask(
+                as_text,
+                scope=scope,
+                ignore_entities=ignore_entities,
+                detect_entities=detect_entities,
+            )
             return result.masked_text if result.token_count else obj
         return obj
 
