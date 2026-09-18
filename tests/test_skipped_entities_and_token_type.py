@@ -22,7 +22,15 @@ import pytest
 
 from pii_protect import PIIMaskingEngine
 from pii_protect.crypto import AESGCMCipher
-from pii_protect.ner.engine import GLiNERLayer, _normalise_entity_names
+from pii_protect.ner.domain import SOURCE as DOMAIN_SOURCE
+from pii_protect.ner.engine import (
+    DEFAULT_SKIPPED_ENTITIES,
+    NEREngine,
+    RegexNERLayer,
+    SpanConflictResolver,
+    TokenizerSafeSpanMerger,
+    _normalise_entity_names,
+)
 from pii_protect.storage import InMemoryStorage
 from pii_protect.tokens import DeterministicTokenGenerator
 from pii_protect.types import DetectedSpan, EntityType
@@ -30,64 +38,66 @@ from pii_protect.types import DetectedSpan, EntityType
 FIXED_KEY = AESGCMCipher.generate_key()
 
 
-def _layer(skip_entities=None) -> GLiNERLayer:
-    """A GLiNERLayer with its model and loading bypassed."""
-    layer = GLiNERLayer.__new__(GLiNERLayer)
-    layer._labels = GLiNERLayer.DEFAULT_LABELS
-    layer._threshold = 0.5
-    layer._max_chars = 4000
-    layer._skipped = _normalise_entity_names(
-        GLiNERLayer.DEFAULT_SKIPPED_ENTITIES if skip_entities is None else skip_entities
+def _engine(skip_entities=None) -> NEREngine:
+    """An NEREngine with only its regex layer, so no model has to load."""
+    engine = NEREngine.__new__(NEREngine)
+    engine._regex_layer = RegexNERLayer()
+    engine._gliner_layer = None
+    engine._spacy_layer = None
+    engine._privacy_filter_layer = None
+    engine._domain_layer = None
+    engine._merger = TokenizerSafeSpanMerger()
+    engine._resolver = SpanConflictResolver()
+    engine._skipped = _normalise_entity_names(
+        DEFAULT_SKIPPED_ENTITIES if skip_entities is None else skip_entities
     )
-    return layer
+    return engine
 
 
-def _predicting(layer: GLiNERLayer, entities):
-    layer.predict = lambda text, labels, threshold=None: entities  # noqa: ARG005
-    return layer
+TEXT = "write to juan@example.com or call 09171234567"
 
 
-FOUND = [
-    {"label": "person", "text": "Juan Cruz", "start": 0, "end": 9, "score": 0.9},
-    {"label": "job title", "text": "Senior Manager", "start": 14, "end": 28, "score": 0.9},
-]
-TEXT = "Juan Cruz is Senior Manager"
+def test_a_declared_category_is_detected_unless_it_is_skipped():
+    kept = [span.entity_type for span in _engine().detect(TEXT)]
+
+    assert EntityType.EMAIL in kept
+    assert EntityType.PHONE in kept
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  Skipping is configurable
-# ─────────────────────────────────────────────────────────────────────────────
+def test_a_skipped_category_comes_back_unmasked():
+    # The whole point: detected, then dropped, so the text it covers is left
+    # in the clear rather than replaced by a token.
+    kept = [span.entity_type for span in _engine(skip_entities=["EMAIL"]).detect(TEXT)]
 
-
-def test_job_titles_and_age_groups_are_discarded_by_default():
-    # Both are asked for so the model does not file them under something that
-    # is masked, but neither is private on its own.
-    spans = _predicting(_layer(), FOUND).detect(TEXT)
-
-    assert [span.entity_type for span in spans] == [EntityType.PERSON]
-
-
-def test_a_deployment_can_choose_what_is_discarded():
-    spans = _predicting(_layer(skip_entities=["PERSON"]), FOUND).detect(TEXT)
-
-    # PERSON gone, and JOB_TITLE now kept — the default is replaced, not added to.
-    assert [span.entity_type for span in spans] == [EntityType.JOB_TITLE]
+    assert EntityType.EMAIL not in kept
+    assert EntityType.PHONE in kept
 
 
 def test_skipping_nothing_keeps_every_category():
-    spans = _predicting(_layer(skip_entities=[]), FOUND).detect(TEXT)
+    kept = [span.entity_type for span in _engine(skip_entities=[]).detect(TEXT)]
 
-    assert [span.entity_type for span in spans] == [
-        EntityType.PERSON,
-        EntityType.JOB_TITLE,
-    ]
+    assert EntityType.EMAIL in kept
+    assert EntityType.PHONE in kept
 
 
 def test_entity_types_are_accepted_as_members_or_strings():
-    from_members = _layer(skip_entities=[EntityType.PERSON, EntityType.JOB_TITLE])
-    from_strings = _layer(skip_entities=["person", "JOB_TITLE"])
+    from_members = _engine(skip_entities=[EntityType.EMAIL])
+    from_strings = _engine(skip_entities=["email"])
 
     assert from_members._skipped == from_strings._skipped
+
+
+def test_skipping_happens_after_conflict_resolution():
+    # A skipped span still competes for its characters first. That is what
+    # lets a declared decoy take a span away from a built-in category before
+    # being dropped — filtering earlier would leave the original detection.
+    resolver = SpanConflictResolver()
+    generic = DetectedSpan(0, 8, "property", EntityType.ADDRESS, 0.64, "gliner")
+    declared = DetectedSpan(0, 8, "property", EntityType.OTHER, 0.51, DOMAIN_SOURCE)
+
+    winner = resolver.resolve([generic, declared])
+
+    assert [span.entity_type for span in winner] == [EntityType.OTHER]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
