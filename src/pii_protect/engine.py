@@ -640,7 +640,7 @@ class PIIMaskingEngine:
         value_hash = self._token_gen.compute_value_hash(plaintext)
 
         existing_token = await self._storage.find_by_value_hash(value_hash, scope)
-        if existing_token:
+        if existing_token and await self._same_entity_type(existing_token, entity_type):
             await self._storage.touch(existing_token)
             await self._storage.log_access(existing_token, "MASK", self._actor, scope)
             return existing_token
@@ -676,6 +676,29 @@ class PIIMaskingEngine:
         await self._storage.put(record)
         await self._storage.log_access(token_value, "MASK", self._actor, scope)
         return token_value
+
+    async def _same_entity_type(self, token_value: str, entity_type: Any) -> bool:
+        """Whether an already-stored token carries the category being masked now.
+
+        Deduplication matches on the value alone, because that is what the
+        storage index is keyed on. The category is not part of that key, so
+        the same value detected as something else — a name that a later
+        configuration reads as a username, a word a domain label reclaims from
+        PERSON — would otherwise be handed back the first token it ever got,
+        still wearing the first category's label. The token says the wrong
+        thing, the vault stores the wrong thing, and no amount of
+        reconfiguring the detector changes either.
+
+        A mismatch falls through to minting a token for this category instead.
+        Tokens are derived from the category as well as the value, so the two
+        do not collide, and re-masking under the original category still finds
+        its original token.
+        """
+        record = await self._storage.get(token_value)
+        if record is None:
+            return False
+        return record.entity_type == entity_type.value
+
 
     async def _unmask_with_stats(
         self, masked_text: str, scope: Optional[str], actor: Optional[str]

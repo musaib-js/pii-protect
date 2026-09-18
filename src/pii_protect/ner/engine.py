@@ -34,9 +34,10 @@ Author: Musaib Altaf
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
-from typing import Optional, Sequence, Union
+from typing import Iterable, Optional, Sequence, Union
 
 from pii_protect.exceptions import InvalidInputError, OptionalDependencyMissingError
 from pii_protect.ner.domain import (
@@ -100,6 +101,46 @@ _VEHICLE_CONTEXT_RE = re.compile(
     r"\bplate\b|\bvehicle\s*(?:no\.?|number)\b|\bregistration\s*(?:no\.?|number)\b",
     re.IGNORECASE,
 )
+
+
+#: Environment variable holding the categories to discard, comma-separated
+#: (e.g. "JOB_TITLE,AGE_GROUP,PROPERTY"). Read when ``NEREngine`` is built
+#: without an explicit ``skip_entities``, so a deployment can deal with a false
+#: positive without a code change — the other half of
+#: ``PII_PROTECT_DOMAIN_ENTITIES``, which is what declares the category in the
+#: first place. Declaring one without skipping it only renames the problem.
+SKIP_ENV_VAR = "PII_PROTECT_SKIP_ENTITIES"
+
+#: Categories detected and then discarded, so the text they cover comes back
+#: unmasked. The two here are asked about because naming them keeps the model
+#: from filing them under something that *is* masked, while neither is private
+#: on its own. A deployment replaces this list to deal with its own false
+#: positives.
+DEFAULT_SKIPPED_ENTITIES = (EntityType.JOB_TITLE, EntityType.AGE_GROUP)
+
+
+def skip_entities_from_env() -> Optional[frozenset[str]]:
+    """The categories to discard, from the environment, or ``None`` if unset.
+
+    ``None`` and empty are different answers: leaving the variable out keeps
+    the default, while ``PII_PROTECT_SKIP_ENTITIES=`` is a deployment saying
+    explicitly that nothing should be discarded.
+    """
+    raw = os.environ.get(SKIP_ENV_VAR)
+    if raw is None:
+        return None
+    return _normalise_entity_names(raw.split(","))
+
+
+def _normalise_entity_names(
+    entities: Iterable[Union[str, "EntityType"]],
+) -> frozenset[str]:
+    """Entity types, as names, from members or plain strings either way."""
+    return frozenset(
+        (item.value if isinstance(item, EntityType) else str(item).strip().upper())
+        for item in entities
+        if str(item).strip()
+    )
 
 
 def _has_nearby_context(
@@ -512,8 +553,6 @@ class GLiNERLayer:
             if not _is_valid_gliner_entity(text=value, label=label, score=score):
                 continue
             entity_type = _GLINER_TO_ENTITY.get(label, EntityType.OTHER)
-            if entity_type is EntityType.JOB_TITLE or entity_type is EntityType.AGE_GROUP:
-                continue
             spans.append(
                 DetectedSpan(
                     start=entity["start"],
@@ -654,6 +693,22 @@ class PrivacyFilterLayer:
         )
         self._threshold = threshold
         self._max_chars = max_chars_per_chunk
+        # Applied after conflict resolution, deliberately. A skipped category
+        # still competes for its characters first — which is the point when it
+        # is a decoy: a label declared for "property" has to take the span away
+        # from ADDRESS before being dropped, or the text stays masked as an
+        # address. Filtering earlier would leave the original detection intact.
+        # Explicit argument first, then the environment, then the default.
+        if skip_entities is not None:
+            self._skipped = _normalise_entity_names(skip_entities)
+        else:
+            from_env = skip_entities_from_env()
+            self._skipped = (
+                from_env
+                if from_env is not None
+                else _normalise_entity_names(DEFAULT_SKIPPED_ENTITIES)
+            )
+
         self._merger = TokenizerSafeSpanMerger()
         logger.info("Transformer privacy-filter model loaded.")
 
@@ -869,8 +924,15 @@ class SpanConflictResolver:
         if b.entity_type in _FINANCIAL_ENTITIES and a.entity_type == EntityType.PHONE:
             return b
 
-        if abs(a.confidence - b.confidence) > 0.05:
-            return a if a.confidence > b.confidence else b
+        # Compared on priority rather than raw confidence, so the bonuses the
+        # formula documents actually decide a contest. A category the
+        # deployment declared itself is worth more than a generic guess over
+        # the same characters: it is the more specific statement about this
+        # text, and without it a configured category could never take a span
+        # from a built-in one that happened to score higher.
+        priority_a, priority_b = self._priority(a), self._priority(b)
+        if abs(priority_a - priority_b) > 0.05:
+            return a if priority_a > priority_b else b
 
         return a if a.length >= b.length else b
 
@@ -925,6 +987,7 @@ class NEREngine:
             Union[str, Path, Sequence[Union[DomainEntity, dict]]]
         ] = None,
         allow_detect_entities: bool = False,
+        skip_entities: Optional[Iterable[Union[str, EntityType]]] = None,
     ) -> None:
         """
         Initialise the enabled NER layers. Models are loaded once and reused.
@@ -1021,6 +1084,22 @@ class NEREngine:
             else None
         )
 
+        # Applied after conflict resolution, deliberately. A skipped category
+        # still competes for its characters first — which is the point when it
+        # is a decoy: a label declared for "property" has to take the span away
+        # from ADDRESS before being dropped, or the text stays masked as an
+        # address. Filtering earlier would leave the original detection intact.
+        # Explicit argument first, then the environment, then the default.
+        if skip_entities is not None:
+            self._skipped = _normalise_entity_names(skip_entities)
+        else:
+            from_env = skip_entities_from_env()
+            self._skipped = (
+                from_env
+                if from_env is not None
+                else _normalise_entity_names(DEFAULT_SKIPPED_ENTITIES)
+            )
+
         self._merger = TokenizerSafeSpanMerger()
         self._resolver = SpanConflictResolver()
         logger.info(
@@ -1099,6 +1178,10 @@ class NEREngine:
             + privacy_filter_spans
         )
         resolved = self._resolver.resolve(all_spans)
+        if self._skipped:
+            resolved = [
+                span for span in resolved if span.entity_type.value not in self._skipped
+            ]
 
         logger.debug(
             "NEREngine.detect: regex=%d domain=%d gliner=%d spacy=%d "
