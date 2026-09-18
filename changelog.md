@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.3.2
+
+### Fixed
+
+- **A configured decoy could suppress a real detection and leave it
+  unmasked.** 0.3.1 discarded categories after conflict resolution and gave a
+  domain-declared span a priority bonus, so a declared category could take a
+  span from a built-in one and then be dropped. With `real estate` declared
+  and skipped, `"i live at 24 Mabini St, Cebu City"` masked only `Cebu City`
+  -- the street address was claimed by the decoy at 0.79, discarded with it,
+  and went out in the clear. Without the decoy it masked correctly.
+
+  Both halves of that are reverted: skipping is back inside the GLiNER layer,
+  and `_pick_winner` compares raw confidence again rather than the priority
+  formula. Anyone running 0.3.1 with a declared category should move to this
+  release.
+
+### Changed
+
+- **Skipping is a label, not an entity type, and the label is asked about in
+  the same prediction.** `skip_entities` is replaced by `skip_labels`, and
+  `PII_PROTECT_SKIP_ENTITIES` by `PII_PROTECT_SKIP_LABELS`, taking labels
+  rather than category names.
+
+  This is how `job title` always worked, now available to a deployment.
+  Naming a label gives the model somewhere truer to put a span, so it stops
+  assigning that span to the category it was getting wrong -- asking in a
+  prediction of its own cannot do that, it can only override the answer
+  afterwards. On `"what is the carpet area of my property"`, `"real estate"`
+  asked alongside the built-in labels scores **0.92** and `ADDRESS` no longer
+  claims the word at all; asked separately it scored 0.51 and had to win a
+  contest to take the span.
+
+  That also removes the need to tune a threshold for a decoy: 0.92 clears the
+  default without configuration, where the separate-call score sat in a narrow
+  band between 0.4 and 0.55. A per-label threshold is not possible anyway --
+  the model takes one threshold per call, so giving each label its own would
+  split them into separate predictions and lose the competition that makes
+  this work.
+
+  `job title` and `age group` are no longer a special case in the code: they
+  are the default value of `DEFAULT_SKIP_LABELS`, the same setting a
+  deployment configures. A deployment's labels are added to them, never
+  substituted, so declaring one decoy cannot quietly start masking every job
+  title. Label order is preserved, because the label list is part of the
+  prompt -- moving `job title` to the end changed `"Engineer Santos"` from
+  `PERSON 'Santos'` to `PERSON 'Engineer Santos'`.
+
 ## 0.3.1
 
 ### Fixed
@@ -24,6 +72,7 @@
 ### Changed
 
 - **Which of GLiNER's categories are discarded is now a deployment's choice.**
+  Superseded by 0.3.2, which replaces `skip_entities` with `skip_labels`.
   `JOB_TITLE` and `AGE_GROUP` were skipped by a hardcoded check.
   `NEREngine(skip_entities=[...])` replaces that list, taking `EntityType`
   members or plain strings, and `PII_PROTECT_SKIP_ENTITIES` sets it from the

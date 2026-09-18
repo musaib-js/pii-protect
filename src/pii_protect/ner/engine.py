@@ -103,33 +103,17 @@ _VEHICLE_CONTEXT_RE = re.compile(
 )
 
 
-#: Environment variable holding the categories to discard, comma-separated
-#: (e.g. "JOB_TITLE,AGE_GROUP,PROPERTY"). Read when ``NEREngine`` is built
-#: without an explicit ``skip_entities``, so a deployment can deal with a false
-#: positive without a code change — the other half of
-#: ``PII_PROTECT_DOMAIN_ENTITIES``, which is what declares the category in the
-#: first place. Declaring one without skipping it only renames the problem.
-SKIP_ENV_VAR = "PII_PROTECT_SKIP_ENTITIES"
-
-#: Categories detected and then discarded, so the text they cover comes back
-#: unmasked. The two here are asked about because naming them keeps the model
-#: from filing them under something that *is* masked, while neither is private
-#: on its own. A deployment replaces this list to deal with its own false
-#: positives.
-DEFAULT_SKIPPED_ENTITIES = (EntityType.JOB_TITLE, EntityType.AGE_GROUP)
+#: Environment variable holding extra labels to ask about and discard,
+#: comma-separated (e.g. "real estate,vehicle colour"). Read when ``NEREngine``
+#: is built without an explicit ``gliner_skip_labels``, so a deployment can
+#: deal with a false positive without a code change.
+SKIP_LABELS_ENV_VAR = "PII_PROTECT_SKIP_LABELS"
 
 
-def skip_entities_from_env() -> Optional[frozenset[str]]:
-    """The categories to discard, from the environment, or ``None`` if unset.
-
-    ``None`` and empty are different answers: leaving the variable out keeps
-    the default, while ``PII_PROTECT_SKIP_ENTITIES=`` is a deployment saying
-    explicitly that nothing should be discarded.
-    """
-    raw = os.environ.get(SKIP_ENV_VAR)
-    if raw is None:
-        return None
-    return _normalise_entity_names(raw.split(","))
+def skip_labels_from_env() -> tuple[str, ...]:
+    """Extra labels to ask about and discard, from the environment."""
+    raw = os.environ.get(SKIP_LABELS_ENV_VAR, "")
+    return tuple(label.strip() for label in raw.split(",") if label.strip())
 
 
 def _normalise_entity_names(
@@ -482,6 +466,21 @@ class GLiNERLayer:
         "age group",
     )
 
+    #: Labels asked about only so their answers can be thrown away.
+    #:
+    #: Naming one gives the model somewhere truer to put a span: without
+    #: "job title", "the accountant said..." reads as a PERSON and "Engineer
+    #: Santos" is masked whole. Neither is private, so both are discarded once
+    #: they have done that absorbing.
+    #:
+    #: This is how a deployment deals with a false positive — name the thing
+    #: being mislabelled and its answers go the same way. The label competes
+    #: with the others in the same prediction, which is what makes the model
+    #: stop assigning that span to the category it was getting wrong.
+    #:
+    #: A deployment's own labels are added to these, not substituted for them.
+    DEFAULT_SKIP_LABELS = ("job title", "age group")
+
     def __init__(
         self,
         model_name: str = "gliner-community/gliner_small-v2.5",
@@ -489,6 +488,7 @@ class GLiNERLayer:
         labels: Optional[tuple[str, ...]] = None,
         max_chars_per_chunk: int = 4000,
         local_files_only: bool = True,
+        skip_labels: Optional[Iterable[str]] = None,
     ) -> None:
         try:
             from gliner import GLiNER
@@ -506,9 +506,21 @@ class GLiNERLayer:
             model_name, local_files_only=local_files_only
         )
         self._threshold = threshold
-        self._labels = labels or self.DEFAULT_LABELS
         self._max_chars = max_chars_per_chunk
-        logger.info("GLiNER model loaded.")
+        extra = tuple(
+            label.strip().lower() for label in (skip_labels or ()) if label.strip()
+        )
+        self._skipped = frozenset(self.DEFAULT_SKIP_LABELS) | frozenset(extra)
+        # A deployment's labels join the same prediction as the rest. Asking
+        # about them in a call of their own would let the model go on
+        # assigning the span to whatever it was getting wrong. Appended in the
+        # order given, because the label list is part of the prompt.
+        asked = labels or self.DEFAULT_LABELS
+        self._labels = (*asked, *(l for l in extra if l not in asked))
+        logger.info(
+            "GLiNER model loaded (discarding: %s).",
+            ", ".join(sorted(self._skipped)) or "nothing",
+        )
 
     def predict(
         self,
@@ -551,6 +563,8 @@ class GLiNERLayer:
             score = float(entity["score"])
             value = entity["text"]
             if not _is_valid_gliner_entity(text=value, label=label, score=score):
+                continue
+            if label in self._skipped:
                 continue
             entity_type = _GLINER_TO_ENTITY.get(label, EntityType.OTHER)
             spans.append(
@@ -693,22 +707,6 @@ class PrivacyFilterLayer:
         )
         self._threshold = threshold
         self._max_chars = max_chars_per_chunk
-        # Applied after conflict resolution, deliberately. A skipped category
-        # still competes for its characters first — which is the point when it
-        # is a decoy: a label declared for "property" has to take the span away
-        # from ADDRESS before being dropped, or the text stays masked as an
-        # address. Filtering earlier would leave the original detection intact.
-        # Explicit argument first, then the environment, then the default.
-        if skip_entities is not None:
-            self._skipped = _normalise_entity_names(skip_entities)
-        else:
-            from_env = skip_entities_from_env()
-            self._skipped = (
-                from_env
-                if from_env is not None
-                else _normalise_entity_names(DEFAULT_SKIPPED_ENTITIES)
-            )
-
         self._merger = TokenizerSafeSpanMerger()
         logger.info("Transformer privacy-filter model loaded.")
 
@@ -924,15 +922,8 @@ class SpanConflictResolver:
         if b.entity_type in _FINANCIAL_ENTITIES and a.entity_type == EntityType.PHONE:
             return b
 
-        # Compared on priority rather than raw confidence, so the bonuses the
-        # formula documents actually decide a contest. A category the
-        # deployment declared itself is worth more than a generic guess over
-        # the same characters: it is the more specific statement about this
-        # text, and without it a configured category could never take a span
-        # from a built-in one that happened to score higher.
-        priority_a, priority_b = self._priority(a), self._priority(b)
-        if abs(priority_a - priority_b) > 0.05:
-            return a if priority_a > priority_b else b
+        if abs(a.confidence - b.confidence) > 0.05:
+            return a if a.confidence > b.confidence else b
 
         return a if a.length >= b.length else b
 
@@ -987,7 +978,7 @@ class NEREngine:
             Union[str, Path, Sequence[Union[DomainEntity, dict]]]
         ] = None,
         allow_detect_entities: bool = False,
-        skip_entities: Optional[Iterable[Union[str, EntityType]]] = None,
+        gliner_skip_labels: Optional[Iterable[str]] = None,
     ) -> None:
         """
         Initialise the enabled NER layers. Models are loaded once and reused.
@@ -1044,6 +1035,11 @@ class NEREngine:
                 model_name=gliner_model,
                 threshold=gliner_threshold,
                 local_files_only=gliner_local_files_only,
+                skip_labels=(
+                    gliner_skip_labels
+                    if gliner_skip_labels is not None
+                    else skip_labels_from_env()
+                ),
             )
 
         self._privacy_filter_layer: Optional[PrivacyFilterLayer] = None
@@ -1075,6 +1071,11 @@ class NEREngine:
                 model_name=gliner_model,
                 threshold=gliner_threshold,
                 local_files_only=gliner_local_files_only,
+                skip_labels=(
+                    gliner_skip_labels
+                    if gliner_skip_labels is not None
+                    else skip_labels_from_env()
+                ),
             )
             enable_gliner = True
 
@@ -1083,22 +1084,6 @@ class NEREngine:
             if self._gliner_layer is not None
             else None
         )
-
-        # Applied after conflict resolution, deliberately. A skipped category
-        # still competes for its characters first — which is the point when it
-        # is a decoy: a label declared for "property" has to take the span away
-        # from ADDRESS before being dropped, or the text stays masked as an
-        # address. Filtering earlier would leave the original detection intact.
-        # Explicit argument first, then the environment, then the default.
-        if skip_entities is not None:
-            self._skipped = _normalise_entity_names(skip_entities)
-        else:
-            from_env = skip_entities_from_env()
-            self._skipped = (
-                from_env
-                if from_env is not None
-                else _normalise_entity_names(DEFAULT_SKIPPED_ENTITIES)
-            )
 
         self._merger = TokenizerSafeSpanMerger()
         self._resolver = SpanConflictResolver()
@@ -1178,10 +1163,6 @@ class NEREngine:
             + privacy_filter_spans
         )
         resolved = self._resolver.resolve(all_spans)
-        if self._skipped:
-            resolved = [
-                span for span in resolved if span.entity_type.value not in self._skipped
-            ]
 
         logger.debug(
             "NEREngine.detect: regex=%d domain=%d gliner=%d spacy=%d "
