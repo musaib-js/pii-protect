@@ -25,9 +25,21 @@
 
 - **Which of GLiNER's categories are discarded is now a deployment's choice.**
   `JOB_TITLE` and `AGE_GROUP` were skipped by a hardcoded check.
-  `NEREngine(gliner_skip_entities=[...])` replaces that list, taking
-  `EntityType` members or plain strings, with `GLiNERLayer.DEFAULT_SKIPPED_ENTITIES`
-  as the default when nothing is passed.
+  `NEREngine(skip_entities=[...])` replaces that list, taking `EntityType`
+  members or plain strings, and `PII_PROTECT_SKIP_ENTITIES` sets it from the
+  environment -- the other half of `PII_PROTECT_DOMAIN_ENTITIES`, which is
+  what declares the category in the first place. Declaring one without
+  skipping it only renames the false positive, so both have to be settable
+  without a code change. An explicit argument wins over the variable, which
+  wins over `DEFAULT_SKIPPED_ENTITIES`; unset keeps the default while
+  `PII_PROTECT_SKIP_ENTITIES=` says explicitly to discard nothing.
+
+  Skipping runs after conflict resolution, so a discarded category still
+  competes for its characters first. That is what lets a declared category
+  take a span away from a built-in one before being dropped: on "what is the
+  carpet area of my property", GLiNER reads "property" as an ADDRESS, and
+  declaring "real estate" then skipping it leaves the sentence untouched
+  while a real address in the same sentence still masks.
 
   Both categories are asked about so the model does not file them under
   something that *is* masked, while neither is private on its own. Naming a

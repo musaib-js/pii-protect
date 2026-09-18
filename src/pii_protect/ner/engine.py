@@ -34,6 +34,7 @@ Author: Musaib Altaf
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Iterable, Optional, Sequence, Union
@@ -102,12 +103,33 @@ _VEHICLE_CONTEXT_RE = re.compile(
 )
 
 
+#: Environment variable holding the categories to discard, comma-separated
+#: (e.g. "JOB_TITLE,AGE_GROUP,PROPERTY"). Read when ``NEREngine`` is built
+#: without an explicit ``skip_entities``, so a deployment can deal with a false
+#: positive without a code change — the other half of
+#: ``PII_PROTECT_DOMAIN_ENTITIES``, which is what declares the category in the
+#: first place. Declaring one without skipping it only renames the problem.
+SKIP_ENV_VAR = "PII_PROTECT_SKIP_ENTITIES"
+
 #: Categories detected and then discarded, so the text they cover comes back
 #: unmasked. The two here are asked about because naming them keeps the model
 #: from filing them under something that *is* masked, while neither is private
 #: on its own. A deployment replaces this list to deal with its own false
 #: positives.
 DEFAULT_SKIPPED_ENTITIES = (EntityType.JOB_TITLE, EntityType.AGE_GROUP)
+
+
+def skip_entities_from_env() -> Optional[frozenset[str]]:
+    """The categories to discard, from the environment, or ``None`` if unset.
+
+    ``None`` and empty are different answers: leaving the variable out keeps
+    the default, while ``PII_PROTECT_SKIP_ENTITIES=`` is a deployment saying
+    explicitly that nothing should be discarded.
+    """
+    raw = os.environ.get(SKIP_ENV_VAR)
+    if raw is None:
+        return None
+    return _normalise_entity_names(raw.split(","))
 
 
 def _normalise_entity_names(
@@ -676,9 +698,16 @@ class PrivacyFilterLayer:
         # is a decoy: a label declared for "property" has to take the span away
         # from ADDRESS before being dropped, or the text stays masked as an
         # address. Filtering earlier would leave the original detection intact.
-        self._skipped = _normalise_entity_names(
-            DEFAULT_SKIPPED_ENTITIES if skip_entities is None else skip_entities
-        )
+        # Explicit argument first, then the environment, then the default.
+        if skip_entities is not None:
+            self._skipped = _normalise_entity_names(skip_entities)
+        else:
+            from_env = skip_entities_from_env()
+            self._skipped = (
+                from_env
+                if from_env is not None
+                else _normalise_entity_names(DEFAULT_SKIPPED_ENTITIES)
+            )
 
         self._merger = TokenizerSafeSpanMerger()
         logger.info("Transformer privacy-filter model loaded.")
@@ -1060,9 +1089,16 @@ class NEREngine:
         # is a decoy: a label declared for "property" has to take the span away
         # from ADDRESS before being dropped, or the text stays masked as an
         # address. Filtering earlier would leave the original detection intact.
-        self._skipped = _normalise_entity_names(
-            DEFAULT_SKIPPED_ENTITIES if skip_entities is None else skip_entities
-        )
+        # Explicit argument first, then the environment, then the default.
+        if skip_entities is not None:
+            self._skipped = _normalise_entity_names(skip_entities)
+        else:
+            from_env = skip_entities_from_env()
+            self._skipped = (
+                from_env
+                if from_env is not None
+                else _normalise_entity_names(DEFAULT_SKIPPED_ENTITIES)
+            )
 
         self._merger = TokenizerSafeSpanMerger()
         self._resolver = SpanConflictResolver()

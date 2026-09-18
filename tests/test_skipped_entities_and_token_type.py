@@ -25,11 +25,13 @@ from pii_protect.crypto import AESGCMCipher
 from pii_protect.ner.domain import SOURCE as DOMAIN_SOURCE
 from pii_protect.ner.engine import (
     DEFAULT_SKIPPED_ENTITIES,
+    SKIP_ENV_VAR,
     NEREngine,
     RegexNERLayer,
     SpanConflictResolver,
     TokenizerSafeSpanMerger,
     _normalise_entity_names,
+    skip_entities_from_env,
 )
 from pii_protect.storage import InMemoryStorage
 from pii_protect.tokens import DeterministicTokenGenerator
@@ -178,3 +180,51 @@ async def test_scopes_stay_isolated(engine):
     there = await engine._store_span("ako", EntityType.PERSON, "scope-2")
 
     assert here != there
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  The skip list from the environment
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_the_environment_sets_what_is_skipped(monkeypatch):
+    monkeypatch.setenv(SKIP_ENV_VAR, "PROPERTY, JOB_TITLE ,")
+
+    assert skip_entities_from_env() == frozenset({"PROPERTY", "JOB_TITLE"})
+
+
+def test_an_unset_variable_leaves_the_default_in_place(monkeypatch):
+    monkeypatch.delenv(SKIP_ENV_VAR, raising=False)
+
+    assert skip_entities_from_env() is None
+
+
+def test_an_empty_variable_means_discard_nothing(monkeypatch):
+    # Different from unset: a deployment saying so explicitly.
+    monkeypatch.setenv(SKIP_ENV_VAR, "")
+
+    assert skip_entities_from_env() == frozenset()
+
+
+def test_an_explicit_argument_wins_over_the_environment(monkeypatch):
+    monkeypatch.setenv(SKIP_ENV_VAR, "EMAIL")
+
+    assert _engine(skip_entities=["PHONE"])._skipped == frozenset({"PHONE"})
+
+
+def test_the_environment_is_used_when_no_argument_is_given(monkeypatch):
+    # Both halves have to be settable without code, or declaring a category
+    # from config and then having to write code to skip it only renames the
+    # false positive.
+    monkeypatch.setenv(SKIP_ENV_VAR, "EMAIL")
+    engine = NEREngine.__new__(NEREngine)
+    engine._regex_layer = RegexNERLayer()
+    engine._gliner_layer = engine._spacy_layer = None
+    engine._privacy_filter_layer = engine._domain_layer = None
+    engine._merger, engine._resolver = TokenizerSafeSpanMerger(), SpanConflictResolver()
+    from_env = skip_entities_from_env()
+    engine._skipped = from_env if from_env is not None else frozenset()
+
+    kept = [span.entity_type for span in engine.detect(TEXT)]
+    assert EntityType.EMAIL not in kept
+    assert EntityType.PHONE in kept
