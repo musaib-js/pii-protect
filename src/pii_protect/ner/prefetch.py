@@ -16,6 +16,8 @@ Author: Musaib Altaf
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pii_protect.exceptions import OptionalDependencyMissingError
 
 
@@ -52,3 +54,35 @@ def prefetch_privacy_filter(model_name: str) -> None:
 
     AutoTokenizer.from_pretrained(model_name)
     AutoModelForTokenClassification.from_pretrained(model_name)
+
+
+def export_gliner_onnx(
+    out_dir: "str | Path",
+    model_name: str = "gliner-community/gliner_small-v2.5",
+    quantize: bool = True,
+    local_files_only: bool = True,
+) -> Path:
+    """
+    Export GLiNER to ONNX (and, by default, an int8 dynamic-quantised copy)
+    for ``NEREngine(gliner_onnx_dir=...)``. Requires ``pii-protect[onnx]``.
+
+    Run this from your own build/provisioning step, once; pii_protect never
+    calls it for you. ``model_name`` must already be cached unless
+    ``local_files_only=False``. Writes ``model.onnx``, ``model_quantized.onnx``
+    (if ``quantize``), plus the config and tokenizer files, to ``out_dir``.
+    """
+    try:
+        from gliner import GLiNER
+        import onnxruntime  # noqa: F401
+    except ImportError as exc:
+        raise OptionalDependencyMissingError(
+            "export_gliner_onnx", "onnx", "gliner/onnxruntime"
+        ) from exc
+
+    model = GLiNER.from_pretrained(model_name, local_files_only=local_files_only)
+    result = model.export_to_onnx(out_dir, quantize=quantize)
+    if quantize and not result.get("quantized_path"):
+        # gliner downgrades a failed quantisation to a warning; a caller who
+        # asked for int8 should not find out at load time.
+        raise RuntimeError("ONNX export succeeded but int8 quantisation failed.")
+    return Path(out_dir)

@@ -36,8 +36,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Iterable, Optional, Sequence, Union
+from typing import Any, Iterable, Optional, Sequence, Union
 
 from pii_protect.exceptions import InvalidInputError, OptionalDependencyMissingError
 from pii_protect.ner.domain import (
@@ -481,14 +482,25 @@ class GLiNERLayer:
     #: A deployment's own labels are added to these, not substituted for them.
     DEFAULT_SKIP_LABELS = ("job title", "age group")
 
+    #: Characters per model call. int8 quantisation loses recall on long
+    #: inputs (on a 13k-char test document it found 21/32 known names at 2000
+    #: chars per chunk and 32/32 at 600), so the ONNX default is smaller. The
+    #: cost is flat: latency tracks total characters, not chunk size.
+    CHUNK_CHARS = 4000
+    ONNX_CHUNK_CHARS = 600
+
     def __init__(
         self,
         model_name: str = "gliner-community/gliner_small-v2.5",
         threshold: float = 0.50,
         labels: Optional[tuple[str, ...]] = None,
-        max_chars_per_chunk: int = 4000,
+        max_chars_per_chunk: Optional[int] = None,
         local_files_only: bool = True,
         skip_labels: Optional[Iterable[str]] = None,
+        onnx_model_dir: Optional[Union[str, Path]] = None,
+        onnx_model_file: str = "model_quantized.onnx",
+        onnx_threads: Optional[int] = None,
+        workers: int = 1,
     ) -> None:
         try:
             from gliner import GLiNER
@@ -497,16 +509,27 @@ class GLiNERLayer:
                 "GLiNERLayer", "gliner", "gliner"
             ) from exc
 
-        logger.info(
-            "Loading GLiNER model: %s (local_files_only=%s)",
-            model_name,
-            local_files_only,
-        )
-        self._model = GLiNER.from_pretrained(
-            model_name, local_files_only=local_files_only
-        )
+        if onnx_model_dir is not None:
+            self._model = self._load_onnx(
+                GLiNER, Path(onnx_model_dir), onnx_model_file, onnx_threads
+            )
+        else:
+            logger.info(
+                "Loading GLiNER model: %s (local_files_only=%s)",
+                model_name,
+                local_files_only,
+            )
+            self._model = GLiNER.from_pretrained(
+                model_name, local_files_only=local_files_only
+            )
         self._threshold = threshold
+        if max_chars_per_chunk is None:
+            max_chars_per_chunk = (
+                self.ONNX_CHUNK_CHARS if onnx_model_dir is not None else self.CHUNK_CHARS
+            )
         self._max_chars = max_chars_per_chunk
+        self._workers = max(1, workers)
+        self._pool: Optional[ThreadPoolExecutor] = None
         extra = tuple(
             label.strip().lower() for label in (skip_labels or ()) if label.strip()
         )
@@ -520,6 +543,47 @@ class GLiNERLayer:
         logger.info(
             "GLiNER model loaded (discarding: %s).",
             ", ".join(sorted(self._skipped)) or "nothing",
+        )
+
+    @staticmethod
+    def _load_onnx(
+        gliner_cls: Any,
+        model_dir: Path,
+        model_file: str,
+        threads: Optional[int],
+    ) -> Any:
+        """Load an exported ONNX GLiNER from ``model_dir``, CPU only.
+
+        Opt-in and offline: the directory is produced ahead of time by
+        ``pii_protect.ner.prefetch.export_gliner_onnx``. A missing file raises
+        here rather than quietly falling back to the slower PyTorch model,
+        because a deployment that asked for ONNX is sizing for ONNX.
+        """
+        path = model_dir / model_file
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"ONNX GLiNER model not found at {path}. Build it ahead of time "
+                "with pii_protect.ner.prefetch.export_gliner_onnx()."
+            )
+        try:
+            import onnxruntime as ort
+        except ImportError as exc:
+            raise OptionalDependencyMissingError(
+                "GLiNERLayer(onnx_model_dir=...)", "onnx", "onnxruntime"
+            ) from exc
+
+        options = ort.SessionOptions()
+        options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        if threads is not None:
+            options.intra_op_num_threads = threads
+
+        logger.info("Loading GLiNER ONNX model: %s", path)
+        return gliner_cls.from_pretrained(
+            str(model_dir),
+            load_onnx_model=True,
+            onnx_model_file=model_file,
+            session_options=options,
+            local_files_only=True,
         )
 
     def predict(
@@ -539,12 +603,29 @@ class GLiNERLayer:
             return []
 
         cutoff = self._threshold if threshold is None else threshold
+        wanted = list(labels)
+        chunks = self._chunk_text(text, self._max_chars)
+        offsets = [0]
+        for chunk in chunks[:-1]:
+            offsets.append(offsets[-1] + len(chunk))
+
+        def run(chunk: str) -> list[dict]:
+            return self._model.predict_entities(
+                chunk, labels=wanted, threshold=cutoff
+            )
+
+        if self._workers > 1 and len(chunks) > 1:
+            if self._pool is None:
+                self._pool = ThreadPoolExecutor(
+                    self._workers, thread_name_prefix="pii-gliner"
+                )
+            results = list(self._pool.map(run, chunks))
+        else:
+            results = [run(chunk) for chunk in chunks]
+
         entities: list[dict] = []
-        offset = 0
-        for chunk in self._chunk_text(text, self._max_chars):
-            for entity in self._model.predict_entities(
-                chunk, labels=list(labels), threshold=cutoff
-            ):
+        for offset, found in zip(offsets, results):
+            for entity in found:
                 entities.append(
                     {
                         **entity,
@@ -552,7 +633,6 @@ class GLiNERLayer:
                         "end": offset + entity["end"],
                     }
                 )
-            offset += len(chunk)
         return entities
 
     def detect(self, text: str) -> list[DetectedSpan]:
@@ -979,6 +1059,11 @@ class NEREngine:
         ] = None,
         allow_detect_entities: bool = False,
         gliner_skip_labels: Optional[Iterable[str]] = None,
+        gliner_onnx_dir: Optional[Union[str, Path]] = None,
+        gliner_onnx_file: str = "model_quantized.onnx",
+        gliner_onnx_threads: Optional[int] = None,
+        gliner_chunk_chars: Optional[int] = None,
+        gliner_workers: int = 1,
     ) -> None:
         """
         Initialise the enabled NER layers. Models are loaded once and reused.
@@ -1025,6 +1110,25 @@ class NEREngine:
             this (and without ``enable_gliner``) there is no model loaded to
             ask, and ``detect_entities`` raises rather than silently finding
             nothing.
+        gliner_onnx_dir : Optional[str | Path]
+            Opt in to ONNX Runtime for GLiNER: a directory built by
+            ``pii_protect.ner.prefetch.export_gliner_onnx``. Off by default,
+            in which case the PyTorch model is used. Raises if the file is
+            missing; it never falls back silently. Requires the
+            ``pii-protect[onnx]`` extra.
+        gliner_onnx_file : str
+            File inside ``gliner_onnx_dir`` to load. The default is the int8
+            quantised export; use ``"model.onnx"`` for the fp32 one.
+        gliner_onnx_threads : Optional[int]
+            ONNX Runtime intra-op threads. ``None`` leaves ORT's default.
+        gliner_chunk_chars : Optional[int]
+            Characters sent to GLiNER per call. ``None`` picks 4000 for
+            PyTorch and 600 for ONNX int8, which loses recall on long chunks.
+        gliner_workers : int
+            Chunks of a long text to run concurrently. 1 (default) is
+            sequential. Measured about 20% faster on a 13k-char text at 4;
+            output is identical. Worth it only for long texts, and keep
+            ``gliner_workers * gliner_onnx_threads`` near your core count.
         """
         self._regex_layer = RegexNERLayer()
         self._spacy_layer = SpacyNERLayer(spacy_model) if enable_spacy else None
@@ -1040,6 +1144,11 @@ class NEREngine:
                     if gliner_skip_labels is not None
                     else skip_labels_from_env()
                 ),
+                onnx_model_dir=gliner_onnx_dir,
+                onnx_model_file=gliner_onnx_file,
+                onnx_threads=gliner_onnx_threads,
+                max_chars_per_chunk=gliner_chunk_chars,
+                workers=gliner_workers,
             )
 
         self._privacy_filter_layer: Optional[PrivacyFilterLayer] = None
@@ -1076,6 +1185,11 @@ class NEREngine:
                     if gliner_skip_labels is not None
                     else skip_labels_from_env()
                 ),
+                onnx_model_dir=gliner_onnx_dir,
+                onnx_model_file=gliner_onnx_file,
+                onnx_threads=gliner_onnx_threads,
+                max_chars_per_chunk=gliner_chunk_chars,
+                workers=gliner_workers,
             )
             enable_gliner = True
 

@@ -586,6 +586,44 @@ prefetch_gliner()                                             # only if you use 
 prefetch_privacy_filter("your/token-classification-model")     # only if you use enable_privacy_filter=True
 ```
 
+### Optional: ONNX Runtime for GLiNER (int8)
+
+Opt-in and CPU-oriented. Export once during provisioning, then point the
+engine at the directory:
+
+```bash
+pip install "pii-protect[onnx]"
+```
+
+```python
+from pii_protect.ner.prefetch import export_gliner_onnx
+
+export_gliner_onnx("/models/gliner-onnx")   # model.onnx + model_quantized.onnx (int8)
+
+engine = NEREngine(
+    enable_gliner=True,
+    gliner_onnx_dir="/models/gliner-onnx",   # default file: model_quantized.onnx
+    gliner_onnx_threads=4,                   # optional
+)
+```
+
+Long texts: latency is compute-bound and tracks total characters, not chunk
+size (roughly 70-100 ms per 1000 chars on a 4-performance-core laptop CPU).
+Two knobs, both measured on a 13k-char document:
+
+- `gliner_chunk_chars` -- defaults to 4000 for PyTorch and **600 for ONNX**.
+  int8 loses recall on long inputs (21/32 known names found at 2000 chars,
+  32/32 at 600); the smaller chunk costs about the same time.
+- `gliner_workers` -- run chunks concurrently (default 1). About 20% faster
+  at 4 workers with byte-identical output. Keep `gliner_workers *
+  gliner_onnx_threads` near your physical core count.
+
+A missing file raises; it never falls back to PyTorch. Quantisation can move
+borderline scores across the threshold, so compare detections on your own
+data first -- `scripts/bench_gliner_onnx.py <dir>` times torch fp32, ONNX fp32
+and ONNX int8 and diffs their spans. Note `gliner` still imports `torch`, so
+this saves time and memory, not the torch install.
+
 ---
 
 ## Domain-specific entity categories

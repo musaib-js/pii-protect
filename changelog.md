@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Opt-in ONNX Runtime (int8) for the GLiNER layer.** `NEREngine(
+  gliner_onnx_dir=..., gliner_onnx_file=..., gliner_onnx_threads=...)`, a
+  new `pii-protect[onnx]` extra, and `prefetch.export_gliner_onnx()` to build
+  the model ahead of time. Off by default; a missing file raises instead of
+  falling back to PyTorch. `scripts/bench_gliner_onnx.py` compares latency
+  and detections against PyTorch.
+- `NEREngine(gliner_chunk_chars=..., gliner_workers=...)`. Chunk size was not
+  configurable through the engine before. `gliner_workers` runs the chunks of
+  a long text concurrently (opt-in, ~20% faster, identical output).
+
+### Changed
+
+- With ONNX int8 the default chunk is 600 chars instead of 4000: int8 loses
+  recall on long inputs (21/32 names found at 2000 chars vs 32/32 at 600 on a
+  13k-char test document). PyTorch behaviour is unchanged.
+
 ## 0.3.2
 
 ### Fixed
