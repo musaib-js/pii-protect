@@ -35,12 +35,21 @@ spacy = ["spacy>=3.7.0"]
 gliner = [
     "gliner>=0.2.22",
 ]
+onnx = [
+    "gliner>=0.2.22",
+    "onnxruntime>=1.17.0",
+    "onnx>=1.15.0",  # export only; inference needs onnxruntime alone
+    "onnxscript>=0.1.0",
+]
 privacy-filter = ["transformers>=4.50.0", "torch>=2.0.0", "accelerate>=1.0", "safetensors>=0.4.0"]
 all = [
     "asyncpg>=0.29.0",
     "redis>=5.0.0",
     "spacy>=3.7.0",
     "gliner>=0.2.22",
+    "onnxruntime>=1.17.0",
+    "onnx>=1.15.0",
+    "onnxscript>=0.1.0",
     "transformers>=4.50.0",
     "torch>=2.0.0",
     "accelerate>=1.0",
