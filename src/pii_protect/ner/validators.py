@@ -88,5 +88,20 @@ def _is_valid_gliner_entity(
         # "Hi", "Ok", "No", etc.
         if len(value) <= 2:
             return False
+        # "who are you" -> "you", "Kumusta ka?" -> "Kumusta ka": a span made
+        # only of pronouns and greetings names nobody.
+        if all(word in _NOT_A_NAME for word in re.findall(r"[\w']+", value.lower())):
+            return False
 
     return True
+
+
+#: English and Filipino pronouns and greetings GLiNER reads as a PERSON.
+_NOT_A_NAME = frozenset(
+    {
+        "i", "me", "you", "he", "him", "she", "her", "we", "us", "they", "them",
+        "it", "yourself", "myself", "someone", "somebody", "anyone", "everyone",
+        "ako", "ikaw", "ka", "kayo", "siya", "sila", "kami", "tayo", "ko", "mo",
+        "po", "kumusta", "kamusta", "musta", "na", "hello", "hi", "hey",
+    }
+)

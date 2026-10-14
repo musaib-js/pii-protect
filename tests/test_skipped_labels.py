@@ -111,3 +111,17 @@ def test_no_variable_means_no_extra_labels(monkeypatch):
     monkeypatch.delenv(SKIP_LABELS_ENV_VAR, raising=False)
 
     assert skip_labels_from_env() == ()
+
+
+@pytest.mark.parametrize("value", ["you", "Kumusta ka", "kamusta ka po", "You"])
+def test_pronoun_or_greeting_is_not_a_person(value):
+    from pii_protect.ner.validators import _is_valid_gliner_entity
+
+    assert not _is_valid_gliner_entity(text=value, label="person", score=0.9)
+
+
+@pytest.mark.parametrize("value", ["Steven Robinson", "Ka Juan", "Maria"])
+def test_real_name_is_still_a_person(value):
+    from pii_protect.ner.validators import _is_valid_gliner_entity
+
+    assert _is_valid_gliner_entity(text=value, label="person", score=0.9)
