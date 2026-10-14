@@ -59,6 +59,7 @@ class EntityType(str, Enum):
     VEHICLE_NUMBER = "VEHICLE_NUMBER"  # license plate (India/Philippines/US/UAE/Saudi Arabia)
     PIN = "PIN"
     OTP = "OTP"
+    CVV = "CVV"  # card security code
     CUSTOM = "CUSTOM"  # caller-declared PII (mask_dict_with_known_pii_keys) — not NER-detected
     JOB_TITLE = "JOB_TITLE"  # not NER-detected, but can be used for partial masking
     OTHER = "OTHER"

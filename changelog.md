@@ -2,6 +2,27 @@
 
 ## 0.3.4
 
+### Added
+
+- **`CVV` entity.** A 3-4 digit code within 5 words of "CVV", "CVC" or
+  "security code" is masked as `{{CVV:...}}`.
+
+### Changed
+
+- **PIN and OTP mask only the code, and look for a label within 5 words.**
+  The label used to be part of the match ("PIN: 4821" was masked whole) and
+  had to sit right before the code. Now only the 4-6 digit code is masked,
+  and it is accepted when a label is within 5 words either side. "passcode"
+  and "mpin" count as a PIN label; "one-time password", "verification code"
+  and "authentication code" as an OTP label. A code with no label nearby is
+  still left alone.
+- With GLiNER on, a model span can now cover the regex code and win the
+  conflict: GLiNER reads "pin 5625" as `ifsc code`. A deployment that ignores
+  `IFSC` should add `ifsc code` to its skip labels, or the PIN goes unmasked.
+  On the UNO golden dataset (594 rows) with that skip label, F1 went from
+  0.865 to 0.870, PIN recall from 0.30 to 0.48 and OTP precision from 0.50 to
+  1.0.
+
 ### Fixed
 
 - **Pronouns and greetings were masked as a person.** GLiNER scored "you" in

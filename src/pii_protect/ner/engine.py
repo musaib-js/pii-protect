@@ -103,6 +103,18 @@ _VEHICLE_CONTEXT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# PIN / OTP / CVV codes are bare short digit runs, so like vehicle plates only
+# the code is captured and a label must sit within this many words either side.
+_CODE_CONTEXT_WORDS = 5
+_PIN_CONTEXT_RE = re.compile(r"\b(?:m?pin|pass\s*code)\b", re.IGNORECASE)
+_OTP_CONTEXT_RE = re.compile(
+    r"\b(?:otp|one[\s-]*time\s*pass(?:word|code)?|verification\s*code|auth(?:entication)?\s*code)\b",
+    re.IGNORECASE,
+)
+_CVV_CONTEXT_RE = re.compile(
+    r"\b(?:cvv2?|cvc2?|cvn|security\s*code|card\s*verification)\b", re.IGNORECASE
+)
+
 
 #: Environment variable holding extra labels to ask about and discard,
 #: comma-separated (e.g. "real estate,vehicle colour"). Read when ``NEREngine``
@@ -135,6 +147,15 @@ def _has_nearby_context(
     window_start = max(0, start - window)
     window_end = min(len(text), end + window)
     return bool(context_re.search(text[window_start:window_end]))
+
+
+def _has_context_words(
+    text: str, start: int, end: int, context_re: re.Pattern, words: int
+) -> bool:
+    """True if ``context_re`` matches within ``words`` words either side of [start, end)."""
+    before = " ".join(text[:start].split()[-words:])
+    after = " ".join(text[end:].split()[:words])
+    return bool(context_re.search(before) or context_re.search(after))
 
 
 class RegexPatternLibrary:
@@ -222,11 +243,13 @@ class RegexPatternLibrary:
         re.IGNORECASE,
     )
 
-    # PIN / OTP: a labelled 4-6 digit code. The trailing \b keeps a 7+ digit
-    # number from being partially captured (same reasoning as the PHONE
-    # patterns above — see V-16/V-17).
-    PIN_NUMBER = re.compile(r"\bPIN\b\D{0,10}\d{4,6}\b", re.IGNORECASE)
-    OTP_NUMBER = re.compile(r"\bOTP\b\D{0,10}\d{4,6}\b", re.IGNORECASE)
+    # PIN / OTP / CVV: only the code itself is matched; a nearby label is
+    # required post-match (see _CODE_CONTEXT_WORDS above). The \b on both
+    # sides keeps a longer number from being partially captured (same
+    # reasoning as the PHONE patterns above — see V-16/V-17).
+    PIN_NUMBER = re.compile(r"\b\d{4,6}\b")
+    OTP_NUMBER = re.compile(r"\b\d{4,6}\b")
+    CVV_NUMBER = re.compile(r"\b\d{3,4}\b")
 
     # Vehicle registration / license plate numbers. Only the plate token
     # itself is matched (see _VEHICLE_CONTEXT_RE above -- a nearby
@@ -291,6 +314,7 @@ class RegexPatternLibrary:
             (cls.MEDICAL_RECORD_NUMBER, EntityType.MEDICAL_RECORD_NUMBER, 0.88),
             (cls.PIN_NUMBER, EntityType.PIN, 0.90),
             (cls.OTP_NUMBER, EntityType.OTP, 0.90),
+            (cls.CVV_NUMBER, EntityType.CVV, 0.90),
             (
                 cls.VEHICLE_NUMBER_IN,
                 EntityType.VEHICLE_NUMBER,
@@ -386,6 +410,16 @@ class RegexNERLayer:
                         text, match.start(), match.end(), _VEHICLE_CONTEXT_RE, _VEHICLE_CONTEXT_WINDOW
                     ):
                         continue
+
+                code_context = {
+                    EntityType.PIN: _PIN_CONTEXT_RE,
+                    EntityType.OTP: _OTP_CONTEXT_RE,
+                    EntityType.CVV: _CVV_CONTEXT_RE,
+                }.get(entity_type)
+                if code_context and not _has_context_words(
+                    text, match.start(), match.end(), code_context, _CODE_CONTEXT_WORDS
+                ):
+                    continue
 
                 if entity_type == EntityType.VEHICLE_NUMBER:
                     if not _has_nearby_context(
