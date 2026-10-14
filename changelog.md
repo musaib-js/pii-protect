@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.4
+
+### Fixed
+
+- **Pronouns and greetings were masked as a person.** GLiNER scored "you" in
+  "who are you" (0.614) and "Kumusta ka?" (0.737) as `person`, above the 0.50
+  cut-off. A `person`/`customer name` span made only of English or Filipino
+  pronouns and greetings is now discarded. Real names next to them ("Kumusta
+  ka, Juan dela Cruz?") are still masked; golden-dataset scores are unchanged.
+
 ## 0.3.3
 
 ### Added
