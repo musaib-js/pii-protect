@@ -410,9 +410,12 @@ text and merges their output into a single non-overlapping span list:
   `TIN` (BIR Tax Identification Number), `PH_GOVT_ID` (SSS/GSIS/
   PhilHealth/Pag-IBIG/UMID/PhilSys), `STUDENT_ID`, and
   `MEDICAL_RECORD_NUMBER` -- plus labelled `PIN`/`OTP` codes (a 4-6
-  digit number found near the word "PIN" or "OTP") and `VEHICLE_NUMBER`
-  (India, Philippines, US, UAE, Saudi Arabia license plates). The
-  Philippines IDs, `STUDENT_ID`/`MEDICAL_RECORD_NUMBER`/`PIN`/`OTP`, and
+  digit number within 5 words of "PIN"/"passcode" or "OTP"/"verification
+  code"), `CVV` (a 3-4 digit number within 5 words of "CVV"/"CVC"/
+  "security code"; only the code is masked, not the label) and
+  `VEHICLE_NUMBER` (India, Philippines, US, UAE, Saudi Arabia license
+  plates). The Philippines IDs, `STUDENT_ID`/`MEDICAL_RECORD_NUMBER`/
+  `PIN`/`OTP`/`CVV`, and
   `VEHICLE_NUMBER` patterns all require a nearby label (e.g. "TIN",
   "SSS", "Student ID", "OTP", "plate"/"vehicle no"/"registration no")
   rather than matching on shape alone -- those shapes are too generic

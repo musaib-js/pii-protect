@@ -4,7 +4,7 @@ tests.test_ph_ids_and_ignore
 Coverage for:
   - Philippines-specific regex entities: TIN, PH_GOVT_ID, STUDENT_ID,
     MEDICAL_RECORD_NUMBER.
-  - Labelled PIN/OTP detection (a 4-6 digit code near the word PIN/OTP).
+  - PIN/OTP/CVV detection (a short code within 5 words of its label).
   - The ``ignore_entities`` parameter on mask()/mask_dict()/redact(),
     which lets a caller opt specific entity types out of masking.
 
@@ -56,6 +56,11 @@ async def test_ph_entities_are_masked(text, expected_type, leaked_fragment):
         ("Your OTP is 483920, valid for 5 minutes.", "OTP"),
         ("PIN: 4821", "PIN"),
         ("Enter your pin 993201 to continue.", "PIN"),
+        ("can i set my passcode as 0086?", "PIN"),
+        ("i never got the 508423 one-time password", "OTP"),
+        ("the verification code is 77120", "OTP"),
+        ("my card cvv is 123", "CVV"),
+        ("security code 4567 on the back", "CVV"),
     ],
 )
 async def test_pin_and_otp_codes_are_masked(text, expected_type):
@@ -131,3 +136,19 @@ async def test_mask_dict_ignore_entities_applies_to_every_leaf():
         result = await engine.mask_dict(data, ignore_entities=["PIN"])
         assert result["note"] == "PIN: 4821"
         assert "{{EMAIL:" in result["email"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text",
+    [
+        "i paid 1500 for it and then changed my pin",  # label 6 words away
+        "in 2024 i opened a savings account",  # no label at all
+    ],
+)
+async def test_code_without_a_nearby_label_is_left_alone(text):
+    async with PIIMaskingEngine(
+        storage=InMemoryStorage(), encryption_key=FIXED_KEY, token_generator=token_generator
+    ) as engine:
+        result = await engine.mask(text)
+        assert result.masked_text == text
