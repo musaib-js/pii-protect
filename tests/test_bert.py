@@ -44,7 +44,6 @@ async def test_bert_masks_realistic_vendor_document():
     ) as engine:
 
         result = await engine.mask(text)
-        print(result)
 
         assert "{{PERSON:" in result.masked_text
         assert "{{ORGANISATION:" in result.masked_text
@@ -174,7 +173,6 @@ async def test_bert_reuses_tokens_for_same_person_and_company():
     ) as engine:
 
         result = await engine.mask(text)
-        print(result)
 
         person_tokens = [
             entity.token for entity in result.entities if entity.entity_type == "PERSON"
@@ -257,7 +255,6 @@ async def test_aadhar_numbers():
         result = await engine.mask(text)
 
         assert "{{AADHAR:" in result.masked_text
-        print(result)
         
 
         restored = await engine.unmask(result.masked_text)
