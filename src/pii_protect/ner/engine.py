@@ -768,6 +768,81 @@ class SpacyNERLayer:
         return spans
 
 
+_BERT_TO_ENTITY = {
+    "PER": EntityType.PERSON,
+    "B-PER": EntityType.PERSON,
+    "I-PER": EntityType.PERSON,
+    "ORG": EntityType.ORGANISATION,
+    "B-ORG": EntityType.ORGANISATION,
+    "I-ORG": EntityType.ORGANISATION,
+    "LOC": EntityType.ADDRESS,
+    "B-LOC": EntityType.ADDRESS,
+    "I-LOC": EntityType.ADDRESS,
+}
+
+class BertNERLayer:
+    def __init__(self, threshold=0.7, device="cpu", model_name="dslim/bert-base-NER"):
+
+        self.device = device
+        self.model_name = model_name
+
+        try:
+            from transformers import AutoTokenizer, AutoModelForTokenClassification
+            from transformers import pipeline
+        except ImportError as exc:
+            raise OptionalDependencyMissingError(
+                "BertNERLayer", "bert", "transformers"
+            ) from exc
+
+        logger.info(
+            "Loading bert: \"%s\" (device=%s)",
+            self.model_name,
+            self.device,
+        )
+
+        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self._model = AutoModelForTokenClassification.from_pretrained(self.model_name)
+        self._nlp = pipeline("ner", model=self._model, tokenizer=self._tokenizer, aggregation_strategy="simple")
+        self.threshold = threshold
+
+    def detect(self, text: str) -> list[DetectedSpan]:
+        results = self._nlp(text)
+        spans: list[DetectedSpan] = []
+
+        for ent in results:
+            entity_type = _BERT_TO_ENTITY.get(ent["entity_group"])
+            if entity_type is None:
+                continue
+
+            score = float(ent["score"])
+            if score < self.threshold:
+                continue
+
+            start = int(ent["start"])
+            end = int(ent["end"])
+
+            if (
+                spans
+                and spans[-1].entity_type == entity_type
+                and spans[-1].end == start
+            ):
+                spans[-1].end = end
+                spans[-1].confidence = min(spans[-1].confidence, score)
+                spans[-1].text = text[spans[-1].start:end]
+            else:
+                spans.append(
+                    DetectedSpan(
+                        entity_type=entity_type,
+                        start=start,
+                        end=end,
+                        confidence=score,
+                        text=text[start:end],
+                        source="bert",
+                    )
+                )
+
+        return spans
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  Layer 4: transformer-based privacy filter (optional dependency)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1081,6 +1156,7 @@ class NEREngine:
         enable_spacy: bool = False,
         spacy_model: str = "en_core_web_sm",
         enable_gliner: bool = False,
+        enable_bert: bool = False,
         gliner_model: str = "gliner-community/gliner_small-v2.5",
         gliner_threshold: float = 0.60,
         gliner_local_files_only: bool = True,
@@ -1166,6 +1242,7 @@ class NEREngine:
         """
         self._regex_layer = RegexNERLayer()
         self._spacy_layer = SpacyNERLayer(spacy_model) if enable_spacy else None
+        self._bert_layer = BertNERLayer() if enable_bert else None
 
         self._gliner_layer: Optional[GLiNERLayer] = None
         if enable_gliner:
@@ -1297,6 +1374,7 @@ class NEREngine:
         )
         gliner_spans = self._gliner_layer.detect(text) if self._gliner_layer else []
         spacy_spans = self._spacy_layer.detect(text) if self._spacy_layer else []
+        bert_spans = self._bert_layer.detect(text) if self._bert_layer else []
         privacy_filter_spans = (
             self._privacy_filter_layer.detect(text)
             if self._privacy_filter_layer
@@ -1308,6 +1386,7 @@ class NEREngine:
             + domain_spans
             + gliner_spans
             + spacy_spans
+            + bert_spans
             + privacy_filter_spans
         )
         resolved = self._resolver.resolve(all_spans)
