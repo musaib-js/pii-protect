@@ -140,7 +140,7 @@ _DAY_NUM = r"(?:0?[1-9]|[12]\d|3[01])"
 _DAY = rf"{_DAY_NUM}(?:st|nd|rd|th)?"
 _MONTH_NUM = r"(?:0?[1-9]|1[0-2])"
 _DATE_YEAR = r"(?:1[89]\d{2}|20\d{2})"
-_DATE_SEP = r"[\s\-]+"
+_DATE_SEP = r"[\s.\-]+"
 
 
 #: Environment variable holding extra labels to ask about and discard,
@@ -291,7 +291,7 @@ class RegexPatternLibrary:
         re.IGNORECASE,
     )
     CARD_EXPIRY = re.compile(
-        rf"(?<![\d./\-]){_MONTH_NUM}\s*[/\-]\s*(?:\d{{2}}|\d{{4}})(?![\d./\-])"
+        rf"(?<![\d./\-]){_MONTH_NUM}\s*[/\-]\s*(?:\d{{2}}|\d{{4}})(?![\d/\-])"
     )
 
     # Vehicle registration / license plate numbers. Only the plate token

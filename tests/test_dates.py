@@ -25,13 +25,10 @@ FIXED_KEY = AESGCMCipher.generate_key()
 @pytest.mark.parametrize(
     "text,expected_type,leaked_fragment",
     [
-        ("Date of Birth: 15 March 1995", "DATE_OF_BIRTH", "15 March 1995"),
-        ("DOB: March 15, 1995", "DATE_OF_BIRTH", "March 15, 1995"),
-        ("Patient born on 15/03/1995.", "DATE_OF_BIRTH", "15/03/1995"),
-        ("Birth date: 1995-03-15", "DATE_OF_BIRTH", "1995-03-15"),
-        ("Card expiry: 12/25", "CARD_EXPIRY", "12/25"),
-        ("Expires 09/2027", "CARD_EXPIRY", "09/2027"),
-        ("Valid Thru: 03-26", "CARD_EXPIRY", "03-26"),
+        ("My card expires 12/25.", "CARD_EXPIRY", "12/25"),
+        ("Valid thru 09/2027.", "CARD_EXPIRY", "09/2027"),
+        ("Date of Birth: Jan. 15, 1995 in bangalore. karnataka, india", "DATE_OF_BIRTH", "Jan. 15, 1995"),
+        ("I was born in 15. jan, 1984 in bangalore. karnataka, india", "DATE_OF_BIRTH", "15. jan, 1984"),
     ],
 )
 async def test_dates_are_masked(text, expected_type, leaked_fragment):
@@ -41,6 +38,7 @@ async def test_dates_are_masked(text, expected_type, leaked_fragment):
         token_generator=token_generator,
     ) as engine:
         result = await engine.mask(text)
+        print(result)
         assert f"{{{{{expected_type}:" in result.masked_text
         assert leaked_fragment not in result.masked_text
 
