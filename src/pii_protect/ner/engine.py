@@ -115,6 +115,33 @@ _CVV_CONTEXT_RE = re.compile(
     r"\b(?:cvv2?|cvc2?|cvn|security\s*code|card\s*verification)\b", re.IGNORECASE
 )
 
+# Dates are common in ordinary text (invoice dates, meeting dates), so, like
+# PIN/OTP/CVV above, only the date is captured and a nearby label decides both
+# whether it is PII and which kind. "15 March 1995" is masked as a date of
+# birth only when a DOB label sits close by; "12/25" as a card expiry only
+# when an expiry label does.
+_DATE_CONTEXT_WORDS = 6
+_DOB_CONTEXT_RE = re.compile(
+    r"\b(?:d\.?o\.?b|date\s+of\s+birth|birth\s*date|birthdate|birthday|born)\b",
+    re.IGNORECASE,
+)
+_CARD_EXPIRY_CONTEXT_RE = re.compile(
+    r"\b(?:exp(?:iry|iration|ires)?|valid\s+(?:thru|through|until|till|to)|"
+    r"validity|good\s+thru)\b",
+    re.IGNORECASE,
+)
+
+_MONTH_NAME = (
+    r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|"
+    r"Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|"
+    r"Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+)
+_DAY_NUM = r"(?:0?[1-9]|[12]\d|3[01])"
+_DAY = rf"{_DAY_NUM}(?:st|nd|rd|th)?"
+_MONTH_NUM = r"(?:0?[1-9]|1[0-2])"
+_DATE_YEAR = r"(?:1[89]\d{2}|20\d{2})"
+_DATE_SEP = r"[\s\-]+"
+
 
 #: Environment variable holding extra labels to ask about and discard,
 #: comma-separated (e.g. "real estate,vehicle colour"). Read when ``NEREngine``
@@ -251,6 +278,22 @@ class RegexPatternLibrary:
     OTP_NUMBER = re.compile(r"\b\d{4,6}\b")
     CVV_NUMBER = re.compile(r"\b\d{3,4}\b")
 
+    # Dates. The full-date pattern covers "15 March 1995", "March 15, 1995",
+    # "15-Mar-1995", "15/03/1995", "03/15/1995" and "1995-03-15". Card
+    # expiries are usually month/year only ("12/25", "12/2025"), so they get
+    # their own pattern. Both are gated on a nearby label in detect(), below.
+    DATE_OF_BIRTH = re.compile(
+        rf"(?:\b(?:{_DAY}{_DATE_SEP}(?:of{_DATE_SEP})?{_MONTH_NAME}|"
+        rf"{_MONTH_NAME}{_DATE_SEP}{_DAY}),?{_DATE_SEP}{_DATE_YEAR}\b"
+        rf"|\b(?:{_DAY_NUM}[./\-]{_MONTH_NUM}|{_MONTH_NUM}[./\-]{_DAY_NUM})"
+        rf"[./\-]{_DATE_YEAR}\b"
+        rf"|\b{_DATE_YEAR}[./\-]{_MONTH_NUM}[./\-]{_DAY_NUM}\b)",
+        re.IGNORECASE,
+    )
+    CARD_EXPIRY = re.compile(
+        rf"(?<![\d./\-]){_MONTH_NUM}\s*[/\-]\s*(?:\d{{2}}|\d{{4}})(?![\d./\-])"
+    )
+
     # Vehicle registration / license plate numbers. Only the plate token
     # itself is matched (see _VEHICLE_CONTEXT_RE above -- a nearby
     # "plate"/"vehicle no"/"registration no" label is required post-match,
@@ -315,6 +358,8 @@ class RegexPatternLibrary:
             (cls.PIN_NUMBER, EntityType.PIN, 0.90),
             (cls.OTP_NUMBER, EntityType.OTP, 0.90),
             (cls.CVV_NUMBER, EntityType.CVV, 0.90),
+            (cls.DATE_OF_BIRTH, EntityType.DATE_OF_BIRTH, 0.92),
+            (cls.CARD_EXPIRY, EntityType.CARD_EXPIRY, 0.90),
             (
                 cls.VEHICLE_NUMBER_IN,
                 EntityType.VEHICLE_NUMBER,
@@ -333,7 +378,7 @@ class RegexNERLayer:
     """
     Layer 1: regex-based entity detection. No optional dependencies.
 
-    Two patterns get a semantic post-filter beyond the raw regex match,
+    Several patterns get a semantic post-filter beyond the raw regex match,
     because a shape match alone is too permissive:
       - CREDIT_CARD candidates must pass a Luhn checksum (V-12): a
         sequential or all-zero 13-19 digit run is not a real card number.
@@ -353,6 +398,11 @@ class RegexNERLayer:
         no"/"registration no" label. A few letters plus a few digits is
         an extremely common shape (invoice codes, coupon codes, tracking
         numbers), so it isn't distinctive enough to flag on its own.
+      - DATE_OF_BIRTH and CARD_EXPIRY candidates must appear within
+        ``_DATE_CONTEXT_WORDS`` words of a matching label ("DOB", "date
+        of birth", "born" for the former; "expiry", "expires", "valid
+        thru" for the latter). Dates are ordinary text, so shape alone
+        would mask invoice and meeting dates too.
 
     Note on PHONE patterns deliberately NOT included here: an earlier
     bare-7-digit pattern (`\\d{3}[-.\\s]?\\d{4}`) was removed. It both
@@ -418,6 +468,15 @@ class RegexNERLayer:
                 }.get(entity_type)
                 if code_context and not _has_context_words(
                     text, match.start(), match.end(), code_context, _CODE_CONTEXT_WORDS
+                ):
+                    continue
+
+                date_context = {
+                    EntityType.DATE_OF_BIRTH: _DOB_CONTEXT_RE,
+                    EntityType.CARD_EXPIRY: _CARD_EXPIRY_CONTEXT_RE,
+                }.get(entity_type)
+                if date_context and not _has_context_words(
+                    text, match.start(), match.end(), date_context, _DATE_CONTEXT_WORDS
                 ):
                     continue
 
