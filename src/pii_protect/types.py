@@ -60,6 +60,8 @@ class EntityType(str, Enum):
     PIN = "PIN"
     OTP = "OTP"
     CVV = "CVV"  # card security code
+    DATE_OF_BIRTH = "DATE_OF_BIRTH"  # e.g. "15 March 1995", gated on a DOB label
+    CARD_EXPIRY = "CARD_EXPIRY"  # payment card expiry, e.g. "12/25", gated on an expiry label
     CUSTOM = "CUSTOM"  # caller-declared PII (mask_dict_with_known_pii_keys) — not NER-detected
     JOB_TITLE = "JOB_TITLE"  # not NER-detected, but can be used for partial masking
     OTHER = "OTHER"
