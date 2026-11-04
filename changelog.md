@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.5
+
+### Added
+
+- Added regex for date of birth and card expiry date detection.
+
 ## 0.3.4
 
 ### Added
